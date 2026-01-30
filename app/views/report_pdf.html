@@ -174,6 +174,7 @@
                         <tr>
                             <th>Count Total</th>
                             <th>Count in Review</th>
+                            <th>Count Done</th>
                             <th>Dificuldade Total</th>
                             <th>Dificuldade in Review</th>
                             <th>Dificuldade Done</th>
@@ -187,6 +188,7 @@
                         <tr>
                             <td>{{ milestone_section.difficulty_table.total_count }}</td>
                             <td>{{ milestone_section.difficulty_table.review_count }}</td>
+                            <td>{{ milestone_section.difficulty_table.count_done }}</td>
                             <td>{{ milestone_section.difficulty_table.difficulty_total }}</td>
                             <td>{{ milestone_section.difficulty_table.difficulty_review }}</td>
                             <td>{{ milestone_section.difficulty_table.difficulty_done }}</td>
@@ -211,19 +213,10 @@
 
             <div class="project-chart-grid">
                 <div class="project-chart-card">
-                     {{ project_charts.progress_svg | safe }}
+                     {{ project_charts.weekly_progress_svg | safe }}
                 </div>
                 <div class="project-chart-card">
-                    {{ project_charts.milestone_hours_svg | safe }}
-                </div>
-            </div>
-
-            <div class="project-chart-grid">
-                <div class="project-chart-card">
-                    {{ project_charts.milestone_difficulty_svg | safe }}
-                </div>
-                <div class="project-chart-card">
-                    {{ project_charts.milestone_count_svg | safe }}
+                    {{ project_charts.milestone_labels_svg | safe }}
                 </div>
             </div>
             

@@ -44,6 +44,7 @@ class ProjectItem:
     estimate_hours: float
     labels: list[str]
     content_type: str = "Issue"
+    repository: str | None = None
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -285,11 +286,13 @@ def fetch_project_items(
                   title
                   createdAt
                   labels(first: 50) { nodes { name } }
+                  repository { name }
                 }
                 ... on PullRequest {
                   title
                   createdAt
                   labels(first: 50) { nodes { name } }
+                  repository { name }
                 }
                 ... on DraftIssue {
                   title
@@ -324,6 +327,7 @@ def fetch_project_items(
 
             content = item.get("content") or {}
             content_type = content.get("__typename", "Issue")
+            repository_name = (content.get("repository") or {}).get("name")
             if content_type == "PullRequest":
                 continue
             label_nodes = (content.get("labels") or {}).get("nodes") or []
@@ -382,6 +386,7 @@ def fetch_project_items(
                     estimate_hours=estimate_value,
                     labels=labels,
                     content_type=content_type,
+                    repository=repository_name,
                 )
             )
 
@@ -756,7 +761,7 @@ def load_project_charts(
     burnup_end_date = reference_date or milestone_end_date
     burnup_start_date = None
     if burnup_end_date:
-        burnup_start_date = _subtract_months(burnup_end_date, 4)
+        burnup_start_date = _subtract_months(burnup_end_date, 5)
 
     date_counts = {}
     completed_counts = {}
@@ -974,7 +979,7 @@ def load_project_charts(
         for item in items:
             updated_at = item.status_updated_at or item.created_at
             updated = updated_at.date() if updated_at else None
-            if updated and start <= updated <= end:
+            if updated and updated <= end:
                 status_key = _bucket_status(item.status)
                 if status_key in ["cancelled", "duplicate"]:
                     continue
@@ -997,12 +1002,72 @@ def load_project_charts(
         "done_review_percent": _percent(week_done + week_review, week_total),
     }
 
+    weekly_progress_categories = ["Backlog", "Blocked", "In Progress", "In Review", "Done"]
+    weekly_progress_values = [
+        float(week_stats["backlog"]),
+        float(week_stats["blocked"]),
+        float(week_stats["progress"]),
+        float(week_stats["review"]),
+        float(week_stats["done"]),
+    ]
+    weekly_progress_colors = [
+        GITHUB_COLORS["backlog"],
+        GITHUB_COLORS["blocked"],
+        GITHUB_COLORS["progress"],
+        GITHUB_COLORS["review"],
+        GITHUB_COLORS["done"],
+    ]
+    weekly_progress_svg = _multi_color_bar_chart_svg(
+        weekly_progress_categories,
+        weekly_progress_values,
+        weekly_progress_colors,
+        "Progresso da Semana",
+        y_label="Tarefas",
+        x_label="Status",
+    )
+
+    label_counts: dict[str, dict[str, float]] = {}
+    for item in filtered_items:
+        for label in item.labels:
+            if label not in label_counts:
+                label_counts[label] = {"backlog": 0.0, "progress": 0.0, "review": 0.0, "done": 0.0}
+            status_key = _bucket_status(item.status)
+            if status_key in ["cancelled", "duplicate"]:
+                continue
+            if status_key not in label_counts[label]:
+                status_key = "backlog"
+            label_counts[label][status_key] += 1
+
+    sorted_labels = sorted(
+        label_counts.items(), key=lambda x: sum(x[1].values()), reverse=True
+    )
+    top_labels = [label for label, _ in sorted_labels[:15]]
+
+    milestone_labels_stacks = {
+        "Backlog": [label_counts[label].get("backlog", 0.0) for label in top_labels],
+        "In progress": [label_counts[label].get("progress", 0.0) for label in top_labels],
+        "In review": [label_counts[label].get("review", 0.0) for label in top_labels],
+        "Done": [label_counts[label].get("done", 0.0) for label in top_labels],
+    }
+    milestone_labels_colors = {
+        "Backlog": GITHUB_COLORS["backlog"],
+        "In progress": GITHUB_COLORS["progress"],
+        "In review": GITHUB_COLORS["review"],
+        "Done": GITHUB_COLORS["done"],
+    }
+    milestone_labels_svg = _stacked_bar_svg(
+        top_labels,
+        milestone_labels_stacks,
+        milestone_labels_colors,
+        "Labels da Milestone",
+        y_label="Label",
+        x_label="Tarefas",
+    )
+
     return {
         "burnup_svg": burnup_svg,
-        "progress_svg": progress_svg,
-        "milestone_hours_svg": milestone_hours_svg,
-        "milestone_difficulty_svg": milestone_difficulty_svg,
-        "milestone_count_svg": milestone_count_svg,
+        "weekly_progress_svg": weekly_progress_svg,
+        "milestone_labels_svg": milestone_labels_svg,
         "tables": {
             "weekly": weekly_table,
             "total": total_table,
