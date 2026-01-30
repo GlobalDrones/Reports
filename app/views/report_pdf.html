@@ -207,15 +207,17 @@
         <section class="project-charts-section">
             <h2>Gráficos do Projeto</h2>
             
-            <div class="project-chart-card" style="margin-bottom: 16px;">
-                {{ project_charts.burnup_svg | safe }}
+            <div style="display:flex; gap:16px; align-items:flex-start; margin-bottom:16px;">
+                <div class="project-chart-card" style="flex:1;">
+                    {{ project_charts.burnup_svg | safe }}
+                </div>
+                <div class="project-chart-card" style="flex:1;">
+                    {{ project_charts.weekly_progress_svg | safe }}
+                </div>
             </div>
 
-            <div class="project-chart-grid">
-                <div class="project-chart-card">
-                     {{ project_charts.weekly_progress_svg | safe }}
-                </div>
-                <div class="project-chart-card">
+            <div style="display:flex; justify-content:center; margin-bottom:24px;">
+                <div class="project-chart-card" style="width:700px;">
                     {{ project_charts.milestone_labels_svg | safe }}
                 </div>
             </div>
@@ -226,7 +228,6 @@
                     <thead>
                         <tr>
                             <th>Backlog</th>
-                            <th>Blocked</th>
                             <th>Progress</th>
                             <th>Review</th>
                             <th>Done</th>
@@ -237,7 +238,6 @@
                     <tbody>
                         <tr>
                             <td>{{ project_charts.tables.weekly.backlog }}</td>
-                            <td>{{ project_charts.tables.weekly.blocked }}</td>
                             <td>{{ project_charts.tables.weekly.progress }}</td>
                             <td>{{ project_charts.tables.weekly.review }}</td>
                             <td>{{ project_charts.tables.weekly.done }}</td>
@@ -248,13 +248,14 @@
                 </table>
             </div>
 
-            <h3>Progresso total</h3>
+            <h3>Progresso total da milestone</h3>
             <div class="milestone-table-wrapper" style="margin-top: 12px;">
                 <table class="milestone-table">
                     <thead>
                         <tr>
                             <th>Count Total</th>
                             <th>Count in Review</th>
+                            <th>Count Done</th>
                             <th>Dificuldade Total</th>
                             <th>Dificuldade in Review</th>
                             <th>Dificuldade Done</th>
@@ -268,6 +269,7 @@
                         <tr>
                             <td>{{ project_charts.tables.total.count_total }}</td>
                             <td>{{ project_charts.tables.total.count_review }}</td>
+                            <td>{{ project_charts.tables.total.count_done }}</td>
                             <td>{{ project_charts.tables.total.difficulty_total }}</td>
                             <td>{{ project_charts.tables.total.difficulty_review }}</td>
                             <td>{{ project_charts.tables.total.difficulty_done }}</td>

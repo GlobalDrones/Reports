@@ -170,3 +170,23 @@ Usa `PROJECT_MILESTONE_URLS` para coletar metas específicas por repositório.
 docker build -t reports .
 docker run -p 3456:3456 -v $(pwd)/data:/app/data --env-file .env reports
 ```
+
+## 🔎 Local helper: encontrar ProjectV2 ID
+
+When you need the GitHub ProjectV2 id for a project (used by the milestone charts), there's a small helper script:
+
+```bash
+python scripts/find_project_id.py [project_slug]
+# Example (defaults to 'agrosmart')
+python scripts/find_project_id.py agrosmart
+```
+
+Behavior:
+- First checks `PROJECT_GITHUB_IDS` and `GITHUB_PROJECT_ID` from your `.env`.
+- If not found, attempts to resolve the ProjectV2 id via GitHub GraphQL using `GITHUB_TOKEN`.
+
+Requirements:
+- `GITHUB_TOKEN` must be set in `.env` (or environment) when using the resolver.
+- Token scopes: `project` is required; `read:org` may be required to search organization projects.
+
+If the resolver fails due to insufficient scopes or credentials, the script prints a helpful message explaining the missing permissions.

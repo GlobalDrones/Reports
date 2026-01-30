@@ -458,6 +458,17 @@ def _line_chart_svg(
         f"<text x='{padding}' y='{height - padding + 16}' font-size='10' fill='{TEXT_COLOR}'>0</text>"
     )
 
+    x_labels = ""
+    try:
+        num_points = len(dates)
+        step = max(1, num_points // 6)
+        for i, d in enumerate(dates):
+            if i % step == 0 or i == num_points - 1:
+                label = d.strftime("%d/%m") if hasattr(d, 'strftime') else str(d)
+                x_labels += f"<text x='{_x(i):.2f}' y='{height - padding + 28}' text-anchor='middle' font-size='10' fill='{TEXT_COLOR}'>{label}</text>"
+    except Exception:
+        x_labels = ""
+
     legend_svg = ""
     legend_x = width - 120
     curr_y = legend_start_y
@@ -472,7 +483,7 @@ def _line_chart_svg(
         f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>"
         f"<rect width='{width}' height='{height}' fill='{BG_COLOR}'/>"
         f"<text x='{padding}' y='20' font-size='13' fill='{TEXT_COLOR}' font-weight='700' font-family='sans-serif'>{title}</text>"
-        f"{axis}{''.join(lines)}{legend_svg}"
+        f"{axis}{''.join(lines)}{legend_svg}{x_labels}"
         f"</svg>"
     )
 
@@ -589,12 +600,16 @@ def _bar_chart_svg(
         bars.append(
             f"<rect x='{x:.2f}' y='{y:.2f}' width='{bar_width - 12:.2f}' height='{bar_height:.2f}' fill='{color}' rx='4' />"
         )
-        if value > 0:
-            label_y = y - 5 if bar_height > 15 else y + 12
-            text_color = "white" if bar_height > 15 else TEXT_COLOR
-            bars.append(
-                f"<text x='{x + (bar_width - 12) / 2:.2f}' y='{label_y:.2f}' text-anchor='middle' font-size='10' fill='{text_color}' font-weight='600'>{int(value)}</text>"
-            )
+        if value is not None:
+            try:
+                label_y = y - 6
+                if label_y < padding + 8:
+                    label_y = y + 12
+                bars.append(
+                    f"<text x='{x + (bar_width - 12) / 2:.2f}' y='{label_y:.2f}' text-anchor='middle' font-size='10' fill='{TEXT_COLOR}' font-weight='700'>{int(value)}</text>"
+                )
+            except Exception:
+                pass
         cat_label = categories[i]
         if len(categories) > 8 and len(cat_label) > 10:
             cat_label = cat_label[:8] + ".."
@@ -660,12 +675,18 @@ def _multi_color_bar_chart_svg(
         bars.append(
             f"<rect x='{x:.2f}' y='{y:.2f}' width='{bar_width - 12:.2f}' height='{bar_height:.2f}' fill='{color}' rx='4' />"
         )
-        if value > 0:
-            label_y = y - 5 if bar_height > 15 else y + 12
-            text_color = "white" if bar_height > 15 else TEXT_COLOR
-            bars.append(
-                f"<text x='{x + (bar_width - 12) / 2:.2f}' y='{label_y:.2f}' text-anchor='middle' font-size='10' fill='{text_color}' font-weight='600'>{int(value)}</text>"
-            )
+        if value is not None and value > 0:
+            try:
+                text_x = x + (bar_width - 12) / 2
+                text_y = y + bar_height / 2 + 4
+                if text_y > height - padding - 10:
+                    text_y = height - padding - 10
+                text_color = TEXT_COLOR
+                bars.append(
+                    f"<text x='{text_x:.2f}' y='{text_y:.2f}' text-anchor='middle' font-size='10' fill='{text_color}' font-weight='700'>{int(value)}</text>"
+                )
+            except Exception:
+                pass
         bars.append(
             f"<text x='{x + (bar_width - 12) / 2:.2f}' y='{height - padding + 14}' text-anchor='middle' font-size='10' fill='{TEXT_COLOR}'>{categories[i]}</text>"
         )
@@ -769,12 +790,13 @@ def load_project_charts(
         status_key = _bucket_status(item.status)
         if status_key == "cancelled":
             continue
-        created_day = item.created_at.date()
-        if burnup_start_date and created_day < burnup_start_date:
+        scope_day = item.created_at.date()
+
+        if burnup_start_date and scope_day < burnup_start_date:
             continue
-        if burnup_end_date and created_day > burnup_end_date:
+        if burnup_end_date and scope_day > burnup_end_date:
             continue
-        date_counts[created_day] = date_counts.get(created_day, 0.0) + (item.difficulty or 0.0)
+        date_counts[scope_day] = date_counts.get(scope_day, 0.0) + (item.difficulty or 0.0)
         if _is_duplicate_item(item) and item.status_updated_at:
             done_day = item.status_updated_at.date()
             if burnup_start_date and done_day < burnup_start_date:
@@ -977,16 +999,35 @@ def load_project_charts(
     if week:
         start, end = week
         for item in items:
-            updated_at = item.status_updated_at or item.created_at
-            updated = updated_at.date() if updated_at else None
-            if updated and updated <= end:
+            include = False
+            if getattr(item, "iteration_end", None):
+                if item.iteration_end <= end:
+                    include = True
+            elif getattr(item, "iteration_start", None):
+                if item.iteration_start <= end:
+                    include = True
+            else:
+                created = item.created_at.date() if item.created_at else None
+                if created and created <= end:
+                    include = True
+
+            if include:
                 status_key = _bucket_status(item.status)
                 if status_key in ["cancelled", "duplicate"]:
                     continue
+
+                status_key_at_week = status_key
+                if getattr(item, "status_updated_at", None):
+                    try:
+                        if item.status_updated_at.date() > end:
+                            status_key_at_week = "backlog"
+                    except Exception:
+                        status_key_at_week = status_key
+
                 weekly_items.append(item)
-                if status_key not in week_stats:
-                    status_key = "backlog"
-                week_stats[status_key] += 1
+                if status_key_at_week not in week_stats:
+                    status_key_at_week = "backlog"
+                week_stats[status_key_at_week] += 1
 
     week_total = len(weekly_items)
     week_done = week_stats["done"]
@@ -1002,17 +1043,15 @@ def load_project_charts(
         "done_review_percent": _percent(week_done + week_review, week_total),
     }
 
-    weekly_progress_categories = ["Backlog", "Blocked", "In Progress", "In Review", "Done"]
+    weekly_progress_categories = ["Backlog", "In Progress", "In Review", "Done"]
     weekly_progress_values = [
         float(week_stats["backlog"]),
-        float(week_stats["blocked"]),
         float(week_stats["progress"]),
         float(week_stats["review"]),
         float(week_stats["done"]),
     ]
     weekly_progress_colors = [
         GITHUB_COLORS["backlog"],
-        GITHUB_COLORS["blocked"],
         GITHUB_COLORS["progress"],
         GITHUB_COLORS["review"],
         GITHUB_COLORS["done"],
@@ -1041,7 +1080,7 @@ def load_project_charts(
     sorted_labels = sorted(
         label_counts.items(), key=lambda x: sum(x[1].values()), reverse=True
     )
-    top_labels = [label for label, _ in sorted_labels[:15]]
+    top_labels = [label for label, _ in sorted_labels[:50]]
 
     milestone_labels_stacks = {
         "Backlog": [label_counts[label].get("backlog", 0.0) for label in top_labels],

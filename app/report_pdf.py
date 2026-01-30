@@ -13,7 +13,7 @@ from weasyprint import CSS, HTML
 from app.config import get_assets_dir, get_settings, get_views_dir
 from app.integrations.github import get_issue_title
 from app.milestones import load_milestone_section
-from app.github_projects import load_project_charts
+from app.github_projects import load_project_charts, resolve_project_github_id
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +266,13 @@ def render_pdf(
             project_id = settings.project_github_ids.get(project_slug)
         else:
             project_id = settings.github_project_id
+
+        # Try to resolve project id automatically when not configured
+        if not project_id and settings.github_token:
+            try:
+                project_id = resolve_project_github_id(settings.github_token, project_slug)
+            except Exception:
+                logger.exception("auto-resolve project id failed")
 
         project_charts = load_project_charts(
             token=settings.github_token,
