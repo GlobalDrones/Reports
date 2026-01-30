@@ -1,0 +1,9 @@
+services:
+  relatorio-de-desempenho:
+    build: .
+    ports:
+      - "3456:3456"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
