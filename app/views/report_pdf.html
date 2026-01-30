@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/public/favicon.ico" />
+    <title>{{ file_title if file_title else 'RSD - ' + week_id }}</title>
+</head>
+<body>
+    <main class="page">
+        {% set team_names = reports_by_team|list if reports_by_team else [] %}
+        <header class="page-header">
+            <div class="brand">
+                <img class="brand-logo" src="public/logo192.png" alt="Global Drones" />
+                <div>
+                    <p class="brand-name">Global Drones</p>
+                    <h1>Relatórios do Período</h1>
+                    <p class="period-label">{{ period_label }}</p>
+                    {% if team_names|length == 1 %}
+                    <p class="brand-subtitle">Time {{ team_names[0] }}</p>
+                    {% elif reports_by_project %}
+                    <p class="brand-subtitle">Todos os projetos</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="header-meta">
+                <span class="meta-pill">{{ reports|length }} relatórios</span>
+            </div>
+        </header>
+
+        {% if summary_paragraphs or summary_tasks_worked or summary_tasks_completed or summary_tasks_carryover %}
+        <section class="summary-block">
+            <h2>Resumo executivo</h2>
+            {% if summary_warning %}
+            <div class="summary-warning">{{ summary_warning }}</div>
+            {% endif %}
+            {% if summary_paragraphs %}
+            <div class="summary-text">
+                {% if summary_paragraphs[0] and (summary_paragraphs[0].startswith('Error') or 'Sorry' in summary_paragraphs[0]) %}
+                     <p><em>Resumo indisponível.</em></p>
+                {% else %}
+                    {% for paragraph in summary_paragraphs %}
+                    <p>{{ paragraph }}</p>
+                    {% endfor %}
+                {% endif %}
+            </div>
+            {% endif %}
+            <div class="summary-tasks">
+                <div class="summary-tasks-grid">
+                    <div class="summary-task-card">
+                        <h3>Tarefas trabalhadas</h3>
+                        <table class="summary-task-table">
+                            <tbody>
+                                {% if summary_tasks_worked %}
+                                {% for task in summary_tasks_worked %}
+                                <tr>
+                                    <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
+                                </tr>
+                                {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td class="summary-empty">Sem tarefas iniciadas nesta semana.</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="summary-task-card">
+                        <h3>Tarefas concluídas</h3>
+                        <table class="summary-task-table">
+                            <tbody>
+                                {% if summary_tasks_completed %}
+                                {% for task in summary_tasks_completed %}
+                                <tr>
+                                    <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
+                                </tr>
+                                {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td class="summary-empty">Sem tarefas concluídas nesta semana.</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="summary-task-card">
+                        <h3>Em andamento</h3>
+                        <table class="summary-task-table">
+                            <tbody>
+                                {% if summary_tasks_carryover %}
+                                {% for task in summary_tasks_carryover %}
+                                <tr>
+                                    <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
+                                </tr>
+                                {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td class="summary-empty">Sem tarefas em andamento da semana passada.</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        {% if summary_charts %}
+        <section class="summary-charts">
+            <h2>Indicadores do Projeto</h2>
+            <div class="chart-grid">
+                {% for chart in summary_charts %}
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">{{ chart.title }}</div>
+                        <div class="chart-pill">{{ chart.pill }}</div>
+                    </div>
+                    <div class="chart-metric">
+                        <div class="chart-value">{{ chart.value }}</div>
+                        <div class="chart-subtext">{{ chart.subtext }}</div>
+                    </div>
+                    <div class="chart-svg">{{ chart.svg | safe }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% if milestone_section and False %}
+        <section class="milestone-section">
+            <h2>Avanço por Milestone{% if milestone_section.month %} - {{ milestone_section.month }}{% endif %}</h2>
+            <div class="milestone-grid milestone-grid--{{ milestone_section.columns }}">
+                {% for milestone in milestone_section.milestones %}
+                <div class="milestone-card">
+                    <div class="milestone-card-title">{{ milestone.title }}</div>
+                    <div class="milestone-chart">{{ milestone.svg | safe }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            <h3 style="margin-top: 20px; margin-bottom: 10px; font-size: 16px; color: #1b1f1e;">Progresso da semana</h3>
+            <div class="milestone-table-wrapper">
+                <table class="milestone-table">
+                    <thead>
+                        <tr>
+                            <th>Backlog</th>
+                            <th>Blocked</th>
+                            <th>Progress</th>
+                            <th>Review</th>
+                            <th>Done</th>
+                            <th>% Done</th>
+                            <th>% Done+Review</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ milestone_section.status_table.backlog }}</td>
+                            <td>{{ milestone_section.status_table.blocked }}</td>
+                            <td>{{ milestone_section.status_table.progress }}</td>
+                            <td>{{ milestone_section.status_table.review }}</td>
+                            <td>{{ milestone_section.status_table.done }}</td>
+                            <td>{{ milestone_section.status_table.done_percent }}%</td>
+                            <td>{{ milestone_section.status_table.done_review_percent }}%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 style="margin-top: 20px; margin-bottom: 10px; font-size: 16px; color: #1b1f1e;">Progresso total</h3>
+            <div class="milestone-table-wrapper" style="margin-top: 12px;">
+                <table class="milestone-table">
+                    <thead>
+                        <tr>
+                            <th>Count Total</th>
+                            <th>Count in Review</th>
+                            <th>Dificuldade Total</th>
+                            <th>Dificuldade in Review</th>
+                            <th>Dificuldade Done</th>
+                            <th>% Done Count</th>
+                            <th>% Done Dificuldade</th>
+                            <th>% Done+Review Count</th>
+                            <th>% Done+Review Dificuldade</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ milestone_section.difficulty_table.total_count }}</td>
+                            <td>{{ milestone_section.difficulty_table.review_count }}</td>
+                            <td>{{ milestone_section.difficulty_table.difficulty_total }}</td>
+                            <td>{{ milestone_section.difficulty_table.difficulty_review }}</td>
+                            <td>{{ milestone_section.difficulty_table.difficulty_done }}</td>
+                            <td>{{ milestone_section.difficulty_table.done_count_percent }}%</td>
+                            <td>{{ milestone_section.difficulty_table.done_difficulty_percent }}%</td>
+                            <td>{{ milestone_section.difficulty_table.done_review_count_percent }}%</td>
+                            <td>{{ milestone_section.difficulty_table.done_review_difficulty_percent }}%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+        {% if project_charts %}
+        <section class="project-charts-section">
+            <h2>Gráficos do Projeto</h2>
+            
+            <div class="project-chart-card" style="margin-bottom: 16px;">
+                {{ project_charts.burnup_svg | safe }}
+            </div>
+
+            <div class="project-chart-grid">
+                <div class="project-chart-card">
+                     {{ project_charts.progress_svg | safe }}
+                </div>
+                <div class="project-chart-card">
+                    {{ project_charts.milestone_hours_svg | safe }}
+                </div>
+            </div>
+
+            <div class="project-chart-grid">
+                <div class="project-chart-card">
+                    {{ project_charts.milestone_difficulty_svg | safe }}
+                </div>
+                <div class="project-chart-card">
+                    {{ project_charts.milestone_count_svg | safe }}
+                </div>
+            </div>
+            
+            <h3>Progresso da semana</h3>
+            <div class="milestone-table-wrapper">
+                <table class="milestone-table">
+                    <thead>
+                        <tr>
+                            <th>Backlog</th>
+                            <th>Blocked</th>
+                            <th>Progress</th>
+                            <th>Review</th>
+                            <th>Done</th>
+                            <th>% Done</th>
+                            <th>% Done+Review</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ project_charts.tables.weekly.backlog }}</td>
+                            <td>{{ project_charts.tables.weekly.blocked }}</td>
+                            <td>{{ project_charts.tables.weekly.progress }}</td>
+                            <td>{{ project_charts.tables.weekly.review }}</td>
+                            <td>{{ project_charts.tables.weekly.done }}</td>
+                            <td>{{ project_charts.tables.weekly.done_percent }}%</td>
+                            <td>{{ project_charts.tables.weekly.done_review_percent }}%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>Progresso total</h3>
+            <div class="milestone-table-wrapper" style="margin-top: 12px;">
+                <table class="milestone-table">
+                    <thead>
+                        <tr>
+                            <th>Count Total</th>
+                            <th>Count in Review</th>
+                            <th>Dificuldade Total</th>
+                            <th>Dificuldade in Review</th>
+                            <th>Dificuldade Done</th>
+                            <th>% Done Count</th>
+                            <th>% Done Dificuldade</th>
+                            <th>% Done+Review Count</th>
+                            <th>% Done+Review Dificuldade</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ project_charts.tables.total.count_total }}</td>
+                            <td>{{ project_charts.tables.total.count_review }}</td>
+                            <td>{{ project_charts.tables.total.difficulty_total }}</td>
+                            <td>{{ project_charts.tables.total.difficulty_review }}</td>
+                            <td>{{ project_charts.tables.total.difficulty_done }}</td>
+                            <td>{{ project_charts.tables.total.done_count_percent }}%</td>
+                            <td>{{ project_charts.tables.total.done_difficulty_percent }}%</td>
+                            <td>{{ project_charts.tables.total.done_review_count_percent }}%</td>
+                            <td>{{ project_charts.tables.total.done_review_difficulty_percent }}%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+    {% if reports_by_project %}
+    <div class="reports-section">
+        {% for project_name, project_reports in reports_by_project.items()|sort %}
+        <section class="project-reports">
+            {% for team_name, team_reports in project_reports.items()|sort %}
+            {% if team_reports %}
+            <section class="team-reports">
+                {% for report in team_reports %}
+                <article class="report-card">
+                <header class="report-card-header">
+                    <div>
+                        <h3 class="report-title">{{ report.developer_name }} <span style="font-weight:400; color: #546560; font-size: 0.9em;"> {% if project_name in team_name %}{{ team_name }}{% else %}{{ project_name }} &mdash; {{ team_name }}{% endif %}</span></h3>
+                    </div>
+                    
+                </header>
+
+                {% if report.summary and not report.summary.startswith('Warning:') %}
+                <section class="report-field">
+                    <div class="report-label">Resumo da semana</div>
+                    <div class="report-value">{{ report.summary }}</div>
+                </section>
+                {% endif %}
+
+                {% if report.progress %}
+                <section class="report-field">
+                    <div class="report-label">Progresso desenvolvido</div>
+                    <div class="report-value preserve-lines">{{ report.progress }}</div>
+                </section>
+                {% endif %}
+
+                {% if report.tasks %}
+                <section class="report-field">
+                    <div class="report-label">Tarefas em andamento</div>
+                    <div class="task-list">
+                        {% for task in report.tasks %}
+                        <div class="task-entry">
+                            <div class="task-entry-header">
+                                <a class="task-link" href="{{ task.task_url }}">
+                                    {{ task.title if task.title else 'Link' }}
+                                </a>
+                            </div>
+                            <div style="font-size:8.5pt; color:#546560; margin-top:8px; padding-top:6px; border-top:1px dashed #e6eeea; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                                <div>
+                                    <span style="font-weight:600; color:#444;">Início:</span> {{ task.start_date }}
+                                </div>
+                                <div style="text-align: right;">
+                                    <span style="font-weight:600; color:#444;">Duração:</span> {{ task.days_spent ~ ' dias' if task.end_date else '-' }}
+                                </div>
+                                <div>
+                                    <span style="font-weight:600; color:#444;">Fim:</span> {{ task.end_date if task.end_date else 'Em andamento' }}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+
+                {% if report.had_difficulties %}
+                <section class="report-field report-field--warning">
+                    <div class="report-label">Dificuldades</div>
+                    {% if report.difficulties_description %}
+                    <div class="report-value">{{ report.difficulties_description }}</div>
+                    {% else %}
+                    <div class="report-value">Registrado</div>
+                    {% endif %}
+                </section>
+                {% endif %}
+
+                {% if report.next_steps %}
+                <section class="report-field">
+                    <div class="report-label">Próximos passos</div>
+                    <div class="report-value preserve-lines">{{ report.next_steps }}</div>
+                </section>
+                {% endif %}
+
+                {% if report.had_deliveries %}
+                <section class="report-field report-field--success">
+                    <div class="report-label">Entregas</div>
+                    {% if report.deliveries_notes %}
+                    <div class="report-value">{{ report.deliveries_notes }}</div>
+                    {% else %}
+                    <div class="report-value">Registrado</div>
+                    {% endif %}
+                    {% set delivery_links = report.deliveries_links if report.deliveries_links is defined else [] %}
+                    {% if not delivery_links and report.deliveries_link %}
+                        {% set delivery_links = [report.deliveries_link] %}
+                    {% endif %}
+                    {% if delivery_links %}
+                    <div class="report-value">
+                        Links das entregas:
+                        <ul>
+                            {% for link in delivery_links %}
+                            <li><a href="{{ link }}">{{ link }}</a></li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </section>
+                {% endif %}
+
+
+                <div class="report-footer" style="margin-top:12px; page-break-inside:avoid; border:1px solid #e4ece8; border-radius:10px; background:#f7f9f8; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+                    {% if report.next_week_expectation %}
+                    <div class="report-expectation" style="font-weight:600; font-size:9pt; color:#1b1f1e;">
+                        <span style="color:#546560; text-transform:uppercase; font-size:8pt; letter-spacing:0.05em; margin-right:6px;">Expectativa Próxima Semana:</span>
+                        <span style="background:#3f8f7b; color:white; padding:2px 8px; border-radius:10px;">{{ report.next_week_expectation }}/5</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if report.self_assessment %}
+                    <div class="report-self-assessment" style="font-weight:600; font-size:9pt; color:#1b1f1e;">
+                        <span style="color:#546560; text-transform:uppercase; font-size:8pt; letter-spacing:0.05em; margin-right:6px;">Autoavaliação:</span>
+                         <span style="background:#4aa879; color:white; padding:2px 8px; border-radius:10px;">{{ report.self_assessment }}/5</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </article>
+                {% endfor %}
+            </section>
+            {% endif %}
+            {% endfor %}
+        </section>
+        {% endfor %}
+    </div>
+    {% elif reports_by_team %}
+    <div class="reports-section">
+        {% for team_name, team_reports in reports_by_team.items()|sort %}
+        {% if team_reports %}
+        {% set current_project_name = team_reports[0].project_name if team_reports and team_reports[0].project_name else 'Projeto' %}
+        <section class="team-reports">
+            {% for report in team_reports %}
+            <article class="report-card">
+                <header class="report-card-header">
+                    <div>
+                         <h3 class="report-title">{{ report.developer_name }} <span style="font-weight:400; color: #546560; font-size: 0.9em;"> {% if current_project_name in team_name %}{{ team_name }}{% else %}{{ current_project_name }} &mdash; {{ team_name }}{% endif %}</span></h3>
+                    </div>
+                    
+                </header>
+
+                {% if report.summary and not report.summary.startswith('Warning:') %}
+                <section class="report-field">
+                    <div class="report-label">Resumo da semana</div>
+                    <div class="report-value">{{ report.summary }}</div>
+                </section>
+                {% endif %}
+
+                {% if report.progress %}
+                <section class="report-field">
+                    <div class="report-label">Progresso desenvolvido</div>
+                    <div class="report-value preserve-lines">{{ report.progress }}</div>
+                </section>
+                {% endif %}
+
+                {% if report.tasks %}
+                <section class="report-field">
+                    <div class="report-label">Tarefas em andamento</div>
+                    <div class="task-list">
+                        {% for task in report.tasks %}
+                        <div class="task-entry">
+                            <div class="task-entry-header">
+                                <a class="task-link" href="{{ task.task_url }}">
+                                    {{ task.title if task.title else 'Link' }}
+                                </a>
+                            </div>
+                            <div style="font-size:8.5pt; color:#546560; margin-top:8px; padding-top:6px; border-top:1px dashed #e6eeea; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                                <div>
+                                    <span style="font-weight:600; color:#444;">Início:</span> {{ task.start_date }}
+                                </div>
+                                <div style="text-align: right;">
+                                    <span style="font-weight:600; color:#444;">Duração:</span> {{ task.days_spent ~ ' dias' if task.end_date else '-' }}
+                                </div>
+                                <div>
+                                    <span style="font-weight:600; color:#444;">Fim:</span> {{ task.end_date if task.end_date else 'Em andamento' }}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+
+                {% if report.had_difficulties %}
+                <section class="report-field report-field--warning">
+                    <div class="report-label">Dificuldades</div>
+                    {% if report.difficulties_description %}
+                    <div class="report-value">{{ report.difficulties_description }}</div>
+                    {% else %}
+                    <div class="report-value">Registrado</div>
+                    {% endif %}
+                </section>
+                {% endif %}
+
+                {% if report.next_steps %}
+                <section class="report-field">
+                    <div class="report-label">Próximos passos</div>
+                    <div class="report-value preserve-lines">{{ report.next_steps }}</div>
+                </section>
+                {% endif %}
+
+                {% if report.had_deliveries %}
+                <section class="report-field report-field--success">
+                    <div class="report-label">Entregas</div>
+                    {% if report.deliveries_notes %}
+                    <div class="report-value">{{ report.deliveries_notes }}</div>
+                    {% else %}
+                    <div class="report-value">Registrado</div>
+                    {% endif %}
+                    {% set delivery_links = report.deliveries_links if report.deliveries_links is defined else [] %}
+                    {% if not delivery_links and report.deliveries_link %}
+                        {% set delivery_links = [report.deliveries_link] %}
+                    {% endif %}
+                    {% if delivery_links %}
+                    <div class="report-value">
+                        Links das entregas:
+                        <ul>
+                            {% for link in delivery_links %}
+                            <li><a href="{{ link }}">{{ link }}</a></li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </section>
+                {% endif %}
+
+
+                <div class="report-footer" style="margin-top:12px; page-break-inside:avoid; border:1px solid #e4ece8; border-radius:10px; background:#f7f9f8; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+                    {% if report.next_week_expectation %}
+                    <div class="report-expectation" style="font-weight:600; font-size:9pt; color:#1b1f1e;">
+                        <span style="color:#546560; text-transform:uppercase; font-size:8pt; letter-spacing:0.05em; margin-right:6px;">Expectativa Próxima Semana:</span>
+                        <span style="background:#3f8f7b; color:white; padding:2px 8px; border-radius:10px;">{{ report.next_week_expectation }}/5</span>
+                    </div>
+                    {% endif %}
+                    
+                    {% if report.self_assessment %}
+                    <div class="report-self-assessment" style="font-weight:600; font-size:9pt; color:#1b1f1e;">
+                        <span style="color:#546560; text-transform:uppercase; font-size:8pt; letter-spacing:0.05em; margin-right:6px;">Autoavaliação:</span>
+                         <span style="background:#4aa879; color:white; padding:2px 8px; border-radius:10px;">{{ report.self_assessment }}/5</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </section>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+    </main>
+</body>
+</html>

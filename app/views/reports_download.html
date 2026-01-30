@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/public/favicon.ico" />
+    <link rel="apple-touch-icon" href="/public/logo192.png" />
+    <link rel="stylesheet" href="/static/report_form.css" />
+    <link rel="stylesheet" href="/static/report_landing.css" />
+    <title>RSD - Gerar relatório</title>
+  </head>
+  <body>
+    <main class="container">
+      <header class="brand-header">
+        <img class="brand-logo" src="/public/logo192.png" alt="Global Drones" />
+        <div>
+          <p class="brand-name">Global Drones</p>
+          <h1>Gerar Relatório Semanal</h1>
+          <p class="brand-subtitle">Selecione a semana e o projeto para gerar e baixar o PDF.</p>
+        </div>
+      </header>
+
+      <form id="reports-download-form" method="post" action="/reports/download">
+        <label>
+          Data de referência
+          <input id="reference_date" type="date" required />
+        </label>
+        <input type="hidden" name="week_id" id="week_id" />
+
+        <label>
+          Projeto
+          <select id="project_slug" name="project_slug" required>
+            <option value="">Selecione o projeto</option>
+          </select>
+        </label>
+
+        <div id="team-field" style="display: none;">
+          <label>
+            Time (opcional)
+            <select id="team_slug" name="team_slug">
+              <option value="">Todos</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="milestone-field">
+          <label>
+            Milestone (mês)
+            <select id="milestone_month" name="milestone_month">
+            </select>
+          </label>
+          <p id="milestone-help" class="field-help" style="display: none;">
+            Nenhuma milestone configurada para este projeto.
+          </p>
+        </div>
+
+        <button type="submit" id="download-btn">Gerar e baixar</button>
+      </form>
+
+      {% if status_message %}
+      <div id="form-status" class="status status-{{ status_type }}">
+        {{ status_message }}
+      </div>
+      {% else %}
+      <div id="form-status" class="status" style="display: none;"></div>
+      {% endif %}
+    </main>
+
+    <script>
+      const PROJECTS = {{ projects | default('[]') | safe }};
+      const projectSelect = document.getElementById("project_slug");
+      const teamField = document.getElementById("team-field");
+      const teamSelect = document.getElementById("team_slug");
+      const milestoneField = document.getElementById("milestone-field");
+      const milestoneSelect = document.getElementById("milestone_month");
+      const milestoneHelp = document.getElementById("milestone-help");
+      const weekInput = document.getElementById("week_id");
+      const referenceDateInput = document.getElementById("reference_date");
+      const status = document.getElementById("form-status");
+      const downloadBtn = document.getElementById("download-btn");
+
+      const getIsoWeekId = (dateObj) => {
+        const target = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+        const dayNr = (target.getUTCDay() + 6) % 7;
+        const thursdayOffset = 3 - dayNr;
+        target.setUTCDate(target.getUTCDate() + thursdayOffset);
+        if (thursdayOffset < 0) {
+          target.setUTCDate(target.getUTCDate() + 7);
+        }
+        const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+        const weekNumber = 1 + Math.round((target - firstThursday) / 86400000 / 7);
+        const weekYear = target.getUTCFullYear();
+        return `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
+      };
+
+      const setReferenceDate = () => {
+        if (!referenceDateInput || referenceDateInput.value) {
+          return;
+        }
+        const today = new Date();
+        referenceDateInput.value = today.toISOString().slice(0, 10);
+      };
+
+      const setWeekFromReferenceDate = () => {
+        if (!weekInput || !referenceDateInput || !referenceDateInput.value) {
+          return;
+        }
+        const [year, month, day] = referenceDateInput.value.split("-").map(Number);
+        const selectedDate = new Date(year, (month || 1) - 1, day || 1);
+        weekInput.value = getIsoWeekId(selectedDate);
+      };
+
+      const populateProjects = () => {
+        projectSelect.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Selecione o projeto";
+        projectSelect.appendChild(placeholder);
+        PROJECTS.forEach((project) => {
+          const option = document.createElement("option");
+          option.value = project.slug;
+          option.textContent = project.name;
+          projectSelect.appendChild(option);
+        });
+      };
+
+      const populateTeams = (project) => {
+        teamSelect.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Todos";
+        teamSelect.appendChild(placeholder);
+
+        if (!project || project.slug === "__all__" || !project.teams || project.teams.length === 0) {
+          teamField.style.display = "none";
+          return;
+        }
+
+        project.teams.forEach((team) => {
+          const option = document.createElement("option");
+          option.value = team.slug;
+          option.textContent = team.name;
+          teamSelect.appendChild(option);
+        });
+        teamField.style.display = project.teams.length > 1 ? "block" : "none";
+        if (project.teams.length === 1) {
+          teamSelect.value = "";
+        }
+      };
+
+      const populateMilestones = (project) => {
+        milestoneSelect.innerHTML = "";
+
+        if (project?.slug === "__all__") {
+          milestoneSelect.disabled = true;
+          milestoneHelp.textContent = "Milestone não se aplica ao consolidado de todos os projetos.";
+          milestoneHelp.style.display = "block";
+          milestoneField.style.display = "block";
+          return;
+        }
+
+        const months = project?.milestone_months || [];
+        if (months.length === 0) {
+          milestoneSelect.disabled = true;
+          milestoneHelp.textContent = "Nenhuma milestone configurada para este projeto.";
+          milestoneHelp.style.display = "block";
+          milestoneField.style.display = "block";
+          return;
+        }
+
+        milestoneSelect.disabled = false;
+        milestoneHelp.style.display = "none";
+        milestoneField.style.display = "block";
+
+        months.forEach((month, index) => {
+          const option = document.createElement("option");
+          option.value = month;
+          option.textContent = month;
+          if (index === 0) {
+            option.selected = true; 
+          }
+          milestoneSelect.appendChild(option);
+        });
+      };
+
+      projectSelect.addEventListener("change", () => {
+        const selected = PROJECTS.find((project) => project.slug === projectSelect.value);
+        populateTeams(selected);
+        populateMilestones(selected);
+      });
+
+      referenceDateInput?.addEventListener("change", setWeekFromReferenceDate);
+      setReferenceDate();
+      setWeekFromReferenceDate();
+      populateProjects();
+    </script>
+  </body>
+</html>

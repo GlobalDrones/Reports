@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/public/favicon.ico" />
+    <link rel="apple-touch-icon" href="/public/logo192.png" />
+    <link rel="stylesheet" href="/static/report_form.css" />
+    <link rel="stylesheet" href="/static/report_landing.css" />
+    <title>RSD - Seleção de Formulários</title>
+  </head>
+  <body>
+    <main class="container">
+      <header class="brand-header">
+        <img class="brand-logo" src="/public/logo192.png" alt="Global Drones" />
+        <div>
+          <p class="brand-name">Global Drones</p>
+          <h1>Central de Formulários RSD</h1>
+          <p class="brand-subtitle">Selecione o projeto e o time para abrir o formulário correto.</p>
+        </div>
+      </header>
+
+      <p class="landing-intro">
+        Esta página reúne todos os formulários ativos. Escolha um projeto abaixo e, se necessário,
+        selecione o time correspondente. O formulário sempre usa a data de referência escolhida
+        para definir a semana do relato.
+      </p>
+
+      <section class="cards">
+        {% for project in projects %}
+          <article class="card">
+            <span class="tag">{{ project.slug }}</span>
+            <h3>{{ project.name }}</h3>
+            <a class="cta-link" href="{{ project.url }}">Abrir formulário do projeto</a>
+
+            {% if project.teams and project.teams | length > 1 %}
+              <ul class="team-list">
+                {% for team in project.teams %}
+                  <li>
+                    <span>{{ team.name }}</span>
+                    <a href="{{ team.url }}">Abrir</a>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% elif project.teams and project.teams | length == 1 %}
+              <p class="landing-intro" style="margin-top: 12px;">
+                Time padrão: <strong>{{ project.teams[0].name }}</strong>
+              </p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </section>
+    </main>
+  </body>
+</html>

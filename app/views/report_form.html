@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="icon"
+      href="/public/favicon.ico"
+    />
+    <link rel="apple-touch-icon" href="/public/logo192.png" />
+    <link rel="stylesheet" href="/static/report_form.css" />
+    <link rel="stylesheet" href="/static/report_form_components.css" />
+    <title>RSD - Formulário</title>
+  </head>
+  <body>
+    <main class="container">
+      <header class="brand-header">
+        <img class="brand-logo" src="/public/logo192.png" alt="Global Drones" />
+        <div>
+          <p class="brand-name">Global Drones</p>
+          <h1>Relato Semanal de Desempenho</h1>
+        </div>
+      </header>
+      <form id="rsd-form" method="post" action="{{ '/reports' if not project_slug else '/' + project_slug + '/reports' }}" enctype="multipart/form-data">
+        <noscript>
+          <div class="status error">
+            Este formulário depende de JavaScript para adicionar tasks e enviar os dados corretamente.
+            Ative o JavaScript no navegador para continuar.
+          </div>
+        </noscript>
+        <label>
+          Data de referência
+          <input id="reference_date" type="date" required />
+        </label>
+        <input type="hidden" name="week_id" id="week_id" value="{{ week }}" />
+        <label>
+          Projeto
+          <input type="text" value="{{ project_name }}" readonly />
+        </label>
+        <input type="hidden" name="team_slug" id="team_slug" value="{{ team_slug }}" />
+        <div id="team-selector" style="display: none;">
+          <label>
+            Time
+            <select id="team_select">
+              <option value="">Selecione o time</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Nome do desenvolvedor
+          <select name="developer_name" id="developer_name" required>
+            <option value="">Selecione seu nome</option>
+          </select>
+        </label>
+        <label>
+          Resumo da semana
+          <textarea
+            name="summary"
+            rows="4"
+            maxlength="1000"
+            data-counter="summary-count"
+            required
+          ></textarea>
+          <small id="summary-count">0/1000</small>
+        </label>
+        <label>
+          Progresso desenvolvido
+          <textarea
+            name="progress"
+            rows="4"
+            maxlength="1000"
+            data-counter="progress-count"
+            required
+          ></textarea>
+          <small id="progress-count">0/1000</small>
+        </label>
+
+        <label>
+          Houve dificuldades/impedimentos?
+          <div class="toggle-group" role="radiogroup" aria-label="Houve dificuldades">
+            <label class="toggle-item">
+              <input
+                type="radio"
+                name="had_difficulties"
+                value="true"
+                required
+              />
+              <span>Sim</span>
+            </label>
+            <label class="toggle-item">
+              <input type="radio" name="had_difficulties" value="false" />
+              <span>Não</span>
+            </label>
+          </div>
+        </label>
+
+        <div id="difficulties-field" style="display: none;">
+          <label>
+            Descreva as dificuldades/impedimentos
+            <textarea
+              name="difficulties_description"
+              rows="3"
+              maxlength="1000"
+              data-counter="difficulties-count"
+              placeholder="Descreva os problemas encontrados..."
+            ></textarea>
+            <small id="difficulties-count">0/1000</small>
+          </label>
+        </div>
+
+        <label>
+          Próximos passos
+          <textarea
+            name="next_steps"
+            rows="3"
+            maxlength="1000"
+            data-counter="next-steps-count"
+            required
+          ></textarea>
+          <small id="next-steps-count">0/1000</small>
+        </label>
+
+        <h3>Tasks da Semana</h3>
+        <div id="tasks-container">
+        </div>
+        <button type="button" id="add-task-btn" class="secondary-btn">+ Adicionar Task</button>
+        <input type="hidden" name="tasks_json" id="tasks_json" value="[]" />
+
+        <label>
+          Houve entregas?
+          <div class="toggle-group" role="radiogroup" aria-label="Houve entregas">
+            <label class="toggle-item">
+              <input
+                type="radio"
+                name="had_deliveries"
+                value="true"
+                required
+              />
+              <span>Sim</span>
+            </label>
+            <label class="toggle-item">
+              <input type="radio" name="had_deliveries" value="false" />
+              <span>Não</span>
+            </label>
+          </div>
+        </label>
+
+        <div id="deliveries-field" style="display: none;">
+          <div class="deliveries-section">
+            <div class="deliveries-section-header">
+              <div>
+                <h4 class="deliveries-section-title">Link dos Entregáveis</h4>
+                <p class="deliveries-section-subtitle">
+                  Organize os links das entregas e compartilhe a pasta principal quando existir.
+                </p>
+              </div>
+            </div>
+
+            <label>
+              Descrição das entregas
+              <textarea
+                name="deliveries_notes"
+                rows="3"
+                maxlength="1000"
+                data-counter="deliveries-count"
+                placeholder="Descreva as entregas realizadas..."
+              ></textarea>
+              <small id="deliveries-count">0/1000</small>
+            </label>
+
+            <div class="deliveries-hint">
+              <div class="deliveries-hint-title">Pasta compartilhada</div>
+              <div class="deliveries-hint-text">
+                Centralize os arquivos em uma pasta compartilhada e mantenha os links atualizados abaixo.
+              </div>
+              {% if deliveries_link_url %}
+                <a class="deliveries-folder-link" href="{{ deliveries_link_url }}" target="_blank" rel="noopener">
+                  Acessar pasta compartilhada
+                </a>
+              {% endif %}
+            </div>
+
+            <div class="deliveries-links-block">
+              <div class="deliveries-links-header">
+                <div>
+                  <div class="deliveries-links-title">Link dos Entregáveis</div>
+                  <div class="deliveries-links-help">Adicione um link por entrada.</div>
+                </div>
+                <button type="button" id="add-delivery-link" class="outline-btn delivery-add-btn">
+                  + Adicionar link
+                </button>
+              </div>
+              <div id="deliveries-links"></div>
+            </div>
+            <input type="hidden" name="deliveries_links_json" id="deliveries_links_json" value="[]" />
+          </div>
+        </div>
+
+        <div class="grid">
+          <label>
+            Autoavaliação (1-5)
+            <div class="rating-group" role="radiogroup" aria-label="Autoavaliação">
+              <label class="rating-item">
+                <input type="radio" name="self_assessment" value="1" required />
+                <span>1</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="self_assessment" value="2" />
+                <span>2</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="self_assessment" value="3" />
+                <span>3</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="self_assessment" value="4" />
+                <span>4</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="self_assessment" value="5" />
+                <span>5</span>
+              </label>
+            </div>
+          </label>
+          <label>
+            Expectativa para próxima semana (1-5)
+            <div
+              class="rating-group"
+              role="radiogroup"
+              aria-label="Expectativa da próxima semana"
+            >
+              <label class="rating-item">
+                <input type="radio" name="next_week_expectation" value="1" required />
+                <span>1</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="next_week_expectation" value="2" />
+                <span>2</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="next_week_expectation" value="3" />
+                <span>3</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="next_week_expectation" value="4" />
+                <span>4</span>
+              </label>
+              <label class="rating-item">
+                <input type="radio" name="next_week_expectation" value="5" />
+                <span>5</span>
+              </label>
+            </div>
+          </label>
+        </div>
+        <button type="submit" id="submit-btn">Enviar</button>
+      </form>
+      <div id="form-status" class="status" style="display: none;"></div>
+      <div id="overwrite-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="overwrite-title" aria-describedby="overwrite-text">
+        <div class="modal-dialog">
+          <h2 id="overwrite-title" class="modal-title">Confirmar substituição</h2>
+          <p id="overwrite-text" class="modal-text">
+            Já existe um relatório para essa semana e pessoa. Deseja substituir os dados?
+          </p>
+          <div class="modal-actions">
+            <button type="button" class="modal-btn modal-btn-ghost" id="overwrite-cancel">Cancelar</button>
+            <button type="button" class="modal-btn modal-btn-primary" id="overwrite-confirm">Confirmar</button>
+          </div>
+        </div>
+      </div>
+    </main>
+    <script>
+      const TEAMS = {{ teams | default('[]') | safe }};
+      const SAFE_TEAMS = Array.isArray(TEAMS) ? TEAMS : [];
+
+      const weekInput = document.getElementById("week_id");
+      const referenceDateInput = document.getElementById("reference_date");
+      const getIsoWeekId = (dateObj) => {
+        const target = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+        const dayNr = (target.getUTCDay() + 6) % 7;
+        const thursdayOffset = 3 - dayNr;
+        target.setUTCDate(target.getUTCDate() + thursdayOffset);
+        if (thursdayOffset < 0) {
+          target.setUTCDate(target.getUTCDate() + 7);
+        }
+        const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+        const weekNumber = 1 + Math.round((target - firstThursday) / 86400000 / 7);
+        const weekYear = target.getUTCFullYear();
+        return `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
+      };
+      const setReferenceDate = () => {
+        if (!referenceDateInput || referenceDateInput.value || (weekInput && weekInput.value)) {
+          return;
+        }
+        const today = new Date();
+        referenceDateInput.value = today.toISOString().slice(0, 10);
+      };
+      const setReferenceDateFromWeek = () => {
+        if (!referenceDateInput || !weekInput || !weekInput.value || referenceDateInput.value) {
+          return;
+        }
+        const [yearStr, weekStr] = weekInput.value.split("-W");
+        const year = Number(yearStr);
+        const week = Number(weekStr);
+        if (!year || !week) {
+          return;
+        }
+        const friday = new Date(Date.UTC(year, 0, 4));
+        friday.setUTCDate(friday.getUTCDate() + (week - 1) * 7);
+        const dayNr = (friday.getUTCDay() + 6) % 7;
+        friday.setUTCDate(friday.getUTCDate() - dayNr + 4);
+        referenceDateInput.value = friday.toISOString().slice(0, 10);
+      };
+      const setWeekFromReferenceDate = () => {
+        if (!weekInput || !referenceDateInput) {
+          return;
+        }
+        if (!referenceDateInput.value) {
+          return;
+        }
+        const [year, month, day] = referenceDateInput.value.split("-").map(Number);
+        const selectedDate = new Date(year, (month || 1) - 1, day || 1);
+        weekInput.value = getIsoWeekId(selectedDate);
+      };
+      setReferenceDateFromWeek();
+      setReferenceDate();
+      setWeekFromReferenceDate();
+      referenceDateInput?.addEventListener("change", setWeekFromReferenceDate);
+
+      const devSelect = document.getElementById("developer_name");
+      const teamSelect = document.getElementById("team_select");
+      const teamField = document.getElementById("team-selector");
+      const teamSlugInput = document.getElementById("team_slug");
+
+      const populateTeams = () => {
+        teamSelect.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Selecione o time";
+        teamSelect.appendChild(placeholder);
+
+        SAFE_TEAMS.forEach((team) => {
+          const option = document.createElement("option");
+          option.value = team.slug;
+          option.textContent = team.name;
+          teamSelect.appendChild(option);
+        });
+      };
+
+      const populateMembers = (teamSlug) => {
+        devSelect.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Selecione seu nome";
+        devSelect.appendChild(placeholder);
+
+        const selectedTeam = SAFE_TEAMS.find((team) => team.slug === teamSlug);
+        if (!selectedTeam) {
+          return;
+        }
+
+        selectedTeam.members.forEach((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          devSelect.appendChild(option);
+        });
+      };
+
+      const setupTeams = () => {
+        if (!SAFE_TEAMS || SAFE_TEAMS.length === 0) {
+          return;
+        }
+
+        if (SAFE_TEAMS.length === 1) {
+          teamField.style.display = "none";
+          teamSelect.required = false;
+          const onlyTeam = SAFE_TEAMS[0];
+          teamSlugInput.value = onlyTeam.slug;
+          populateMembers(onlyTeam.slug);
+        } else {
+          teamField.style.display = "block";
+          teamSelect.required = true;
+          populateTeams();
+          const initialSlug = teamSlugInput.value || "";
+          if (initialSlug) {
+            teamSelect.value = initialSlug;
+            populateMembers(initialSlug);
+          } else {
+            populateMembers("");
+          }
+        }
+      };
+
+      teamSelect?.addEventListener("change", () => {
+        const selected = teamSelect.value;
+        teamSlugInput.value = selected;
+        populateMembers(selected);
+      });
+
+      setupTeams();
+
+      const deliveriesField = document.getElementById("deliveries-field");
+      const deliveriesLinksContainer = document.getElementById("deliveries-links");
+      const deliveriesLinksInput = document.getElementById("deliveries_links_json");
+      const addDeliveryLinkBtn = document.getElementById("add-delivery-link");
+      const toggleDeliveriesField = () => {
+        const selected = document.querySelector(
+          "input[name='had_deliveries']:checked"
+        );
+        deliveriesField.style.display = selected && selected.value === "true" ? "block" : "none";
+      };
+      document
+        .querySelectorAll("input[name='had_deliveries']")
+        .forEach((input) => input.addEventListener("change", toggleDeliveriesField));
+      toggleDeliveriesField();
+
+      const createDeliveryLinkItem = () => {
+        const row = document.createElement("div");
+        row.className = "delivery-link-row";
+        row.innerHTML = `
+          <div class="delivery-link-group">
+            <input
+              type="text"
+              class="delivery-link-input"
+              placeholder="Cole a URL do repositório ou pasta de arquivos aqui..."
+            />
+            <div class="delivery-link-actions">
+              <button type="button" class="remove-delivery-link">Remover</button>
+            </div>
+          </div>
+        `;
+        row.querySelector(".remove-delivery-link").addEventListener("click", () => {
+          row.remove();
+          syncDeliveryLinks();
+        });
+        deliveriesLinksContainer.appendChild(row);
+      };
+
+      const syncDeliveryLinks = () => {
+        const links = Array.from(
+          deliveriesLinksContainer.querySelectorAll(".delivery-link-input")
+        )
+          .map((input) => input.value.trim())
+          .filter((value) => value.length > 0);
+        deliveriesLinksInput.value = JSON.stringify(links);
+      };
+
+      addDeliveryLinkBtn?.addEventListener("click", () => {
+        createDeliveryLinkItem();
+      });
+
+      deliveriesLinksContainer?.addEventListener("input", (event) => {
+        if (event.target && event.target.classList.contains("delivery-link-input")) {
+          syncDeliveryLinks();
+        }
+      });
+
+      createDeliveryLinkItem();
+
+      const difficultiesField = document.getElementById("difficulties-field");
+      const toggleDifficultiesField = () => {
+        const selected = document.querySelector(
+          "input[name='had_difficulties']:checked"
+        );
+        difficultiesField.style.display = selected && selected.value === "true" ? "block" : "none";
+      };
+      document
+        .querySelectorAll("input[name='had_difficulties']")
+        .forEach((input) => input.addEventListener("change", toggleDifficultiesField));
+      toggleDifficultiesField();
+
+      const counters = document.querySelectorAll("textarea[data-counter]");
+      counters.forEach((textarea) => {
+        const counterId = textarea.getAttribute("data-counter");
+        const counter = document.getElementById(counterId);
+        const max = parseInt(textarea.getAttribute("maxlength"), 10);
+        const update = () => {
+          counter.textContent = `${textarea.value.length}/${max}`;
+        };
+        textarea.addEventListener("input", update);
+        update();
+      });
+
+      let taskCounter = 0;
+      const tasksContainer = document.getElementById("tasks-container");
+      const addTaskBtn = document.getElementById("add-task-btn");
+
+      const createTaskElement = () => {
+        const taskId = taskCounter++;
+        const taskDiv = document.createElement("div");
+        taskDiv.className = "task-item";
+        taskDiv.dataset.taskId = taskId;
+        taskDiv.innerHTML = `
+          <div class="task-header">
+            <h4>Task ${taskId + 1}</h4>
+            <button type="button" class="remove-task-btn" data-task-id="${taskId}">Remover</button>
+          </div>
+          <label>
+            Link da Task (GitHub)
+            <input
+              type="url"
+              class="task-url"
+              required
+              pattern="^https?://[^\s/]+/.+/(issues|pull|pulls)/\d+/?$"
+              title="Use um link de issue/PR do GitHub (inclui GitHub Enterprise)"
+              placeholder="https://github.com/ORG/REPO/issues/123"
+            />
+          </label>
+          <label>
+            Data de início
+            <input type="date" class="task-start-date" required />
+          </label>
+          <label>
+            Data de fim (se concluída)
+            <input type="date" class="task-end-date" />
+            <small>Deixe em branco se ainda estiver em andamento.</small>
+          </label>
+        `;
+        tasksContainer.appendChild(taskDiv);
+
+        const removeBtn = taskDiv.querySelector(".remove-task-btn");
+        removeBtn.addEventListener("click", () => {
+          taskDiv.remove();
+          updateTaskNumbers();
+        });
+      };
+
+      const updateTaskNumbers = () => {
+        const taskItems = tasksContainer.querySelectorAll(".task-item");
+        taskItems.forEach((item, index) => {
+          item.querySelector("h4").textContent = `Task ${index + 1}`;
+        });
+      };
+
+      addTaskBtn.addEventListener("click", createTaskElement);
+      createTaskElement();
+
+      const form = document.getElementById("rsd-form");
+      const status = document.getElementById("form-status");
+      const submitBtn = document.getElementById("submit-btn");
+      const overwriteModal = document.getElementById("overwrite-modal");
+      const overwriteCancel = document.getElementById("overwrite-cancel");
+      const overwriteConfirm = document.getElementById("overwrite-confirm");
+      let overwriteResolver = null;
+
+      const openOverwriteModal = () => {
+        if (!overwriteModal) {
+          return Promise.resolve(false);
+        }
+        overwriteModal.classList.add("is-visible");
+        document.body.classList.add("modal-open");
+        return new Promise((resolve) => {
+          overwriteResolver = resolve;
+          overwriteConfirm?.focus();
+        });
+      };
+
+      const closeOverwriteModal = (value) => {
+        if (!overwriteModal) {
+          return;
+        }
+        overwriteModal.classList.remove("is-visible");
+        document.body.classList.remove("modal-open");
+        if (overwriteResolver) {
+          overwriteResolver(value);
+          overwriteResolver = null;
+        }
+      };
+
+      overwriteCancel?.addEventListener("click", () => closeOverwriteModal(false));
+      overwriteConfirm?.addEventListener("click", () => closeOverwriteModal(true));
+      overwriteModal?.addEventListener("click", (event) => {
+        if (event.target === overwriteModal) {
+          closeOverwriteModal(false);
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && overwriteModal?.classList.contains("is-visible")) {
+          closeOverwriteModal(false);
+        }
+      });
+
+      const submitForm = async (allowOverwrite = false) => {
+        status.style.display = "none";
+
+        const tasks = [];
+        const taskItems = tasksContainer.querySelectorAll(".task-item");
+        
+        if (taskItems.length === 0) {
+          status.className = "status error";
+          status.textContent = "Adicione pelo menos uma task.";
+          status.style.display = "block";
+          return;
+        }
+
+        for (const item of taskItems) {
+          const taskUrl = item.querySelector(".task-url").value;
+          const startDate = item.querySelector(".task-start-date").value;
+          const endDate = item.querySelector(".task-end-date").value;
+
+          tasks.push({
+            task_url: taskUrl,
+            start_date: startDate,
+            end_date: endDate || null,
+          });
+        }
+
+        document.getElementById("tasks_json").value = JSON.stringify(tasks);
+        syncDeliveryLinks();
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Enviando...";
+
+        try {
+          const payload = new FormData(form);
+          if (allowOverwrite) {
+            payload.set("overwrite", "true");
+          }
+          const response = await fetch(form.action, {
+            method: "POST",
+            body: payload,
+          });
+          const rawText = await response.text();
+          let data = null;
+          try {
+            data = rawText ? JSON.parse(rawText) : null;
+          } catch (parseError) {
+            data = null;
+          }
+          if (!response.ok) {
+            if (response.status === 409) {
+              const confirmOverwrite = await openOverwriteModal();
+              if (confirmOverwrite) {
+                return await submitForm(true);
+              }
+              throw new Error("Envio cancelado. Você pode editar e reenviar se desejar.");
+            }
+            const detail = data?.detail || rawText || "Erro ao enviar.";
+            throw new Error(detail);
+          }
+          if (!data) {
+            throw new Error("Resposta inválida do servidor.");
+          }
+          status.className = "status success";
+          status.innerHTML = `Obrigado! Report enviado.<br/>
+            Semana: ${data.week_id} | Projeto: ${data.project_name} | Nome: ${data.developer_name}`;
+          status.style.display = "block";
+          form.reset();
+          tasksContainer.innerHTML = "";
+          taskCounter = 0;
+          createTaskElement();
+          setupTeams();
+          toggleDeliveriesField();
+          toggleDifficultiesField();
+          setReferenceDate();
+          setWeekFromReferenceDate();
+          deliveriesLinksContainer.innerHTML = "";
+          createDeliveryLinkItem();
+        } catch (error) {
+          status.className = "status error";
+          status.textContent = error.message;
+          status.style.display = "block";
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Enviar";
+        }
+      };
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await submitForm(false);
+      });
+    </script>
+  </body>
+</html>
