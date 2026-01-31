@@ -169,19 +169,36 @@ def create_report(settings: Settings, payload: dict[str, Any]) -> int:
 
         tasks = payload.get("tasks", [])
         for task in tasks:
-            conn.execute(
-                """
-                INSERT INTO tasks (report_id, task_url, start_date, end_date, days_spent)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    report_id,
-                    task["task_url"],
-                    task["start_date"],
-                    task.get("end_date"),
-                    task.get("days_spent"),
-                ),
-            )
+            task_cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+            if "difficulty" in task_cols:
+                conn.execute(
+                    """
+                    INSERT INTO tasks (report_id, task_url, start_date, end_date, days_spent, difficulty)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        report_id,
+                        task["task_url"],
+                        task["start_date"],
+                        task.get("end_date"),
+                        task.get("days_spent"),
+                        task.get("difficulty"),
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO tasks (report_id, task_url, start_date, end_date, days_spent)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        report_id,
+                        task["task_url"],
+                        task["start_date"],
+                        task.get("end_date"),
+                        task.get("days_spent"),
+                    ),
+                )
 
         conn.commit()
         return int(report_id)
