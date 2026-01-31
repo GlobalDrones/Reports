@@ -116,6 +116,133 @@ def get_issue_title(token: str, url: str, *, raise_on_error: bool = False) -> Op
         )
         return None
 
+
+def _parse_numeric_from_text(value: str | None) -> float:
+    if not value:
+        return 0.0
+    import re
+
+    match = re.search(r"-?\d+(?:[\.,]\d+)?", str(value))
+    if not match:
+        return 0.0
+    raw = match.group(0).replace(",", ".")
+    try:
+        return float(raw)
+    except Exception:
+        return 0.0
+
+
+def _map_difficulty_label(label: str | None) -> float:
+    if not label:
+        return 0.0
+    normalized = str(label).strip().upper()
+    scale_map = {
+        "XS": 1.0,
+        "S": 2.0,
+        "M": 3.0,
+        "L": 4.0,
+        "XL": 5.0,
+        "P0": 5.0,
+        "P1": 4.0,
+        "P2": 3.0,
+        "P3": 2.0,
+        "P4": 1.0,
+    }
+    for key, value in scale_map.items():
+        if normalized.startswith(key):
+            return value
+    return _parse_numeric_from_text(label)
+
+
+def get_issue_difficulty(token: str, url: str, *, raise_on_error: bool = False) -> Optional[float]:
+    try:
+        owner, repo, number = parse_github_url(url)
+    except ValueError as exc:
+        if raise_on_error:
+            raise
+        logger.warning("github.url.invalid", extra={"url": url, "error": str(exc)})
+        return None
+
+    try:
+        issue = get_issue(owner, repo, number, token)
+    except requests.RequestException as exc:
+        if raise_on_error:
+            raise
+        logger.debug("github.issue.fetch_failed", extra={"url": url, "error": str(exc)})
+        return None
+
+    node_id = issue.get("node_id")
+    if node_id:
+        query = """
+        query($id: ID!) {
+          node(id: $id) {
+            ... on Issue {
+              projectItems(first:50) {
+                nodes {
+                  fieldValues(first:50) {
+                    nodes {
+                      __typename
+                      ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { name } } }
+                      ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+                      ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        try:
+            resp = requests.post(
+                "https://api.github.com/graphql",
+                json={"query": query, "variables": {"id": node_id}},
+                headers=github_headers(token),
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                payload = resp.json()
+                data = payload.get("data", {}).get("node") or {}
+                project_items = data.get("projectItems", {}).get("nodes", [])
+                for item in project_items:
+                    for fv in (item.get("fieldValues") or {}).get("nodes", []) or []:
+                        field = fv.get("field") or {}
+                        field_name = (field.get("name") or "").strip().lower()
+                        if field_name != "dificuldade":
+                            continue
+                        t = fv.get("__typename")
+                        if t == "ProjectV2ItemFieldNumberValue":
+                            try:
+                                return float(fv.get("number") or 0.0)
+                            except Exception:
+                                return None
+                        if t == "ProjectV2ItemFieldSingleSelectValue":
+                            return _map_difficulty_label(fv.get("name")) or None
+                        if t == "ProjectV2ItemFieldTextValue":
+                            return _map_difficulty_label(fv.get("text")) or None
+        except requests.RequestException:
+            pass
+
+    labels = issue.get("labels") or []
+    for lbl in labels:
+        name = lbl.get("name") if isinstance(lbl, dict) else str(lbl)
+        if not name:
+            continue
+        val = _map_difficulty_label(name)
+        if val and val > 0:
+            return float(val)
+
+    body = issue.get("body") or ""
+    import re
+
+    m = re.search(r"(?i)dificuldade[:\s]*([XSMLP0-9\.,]+)", body or "")
+    if m:
+        parsed = m.group(1)
+        difficulty_val = _map_difficulty_label(parsed) or _parse_numeric_from_text(parsed)
+        if difficulty_val and difficulty_val > 0:
+            return float(difficulty_val)
+
+    return None
     try:
         issue = get_issue(owner, repo, number, token)
         title = issue.get("title")
