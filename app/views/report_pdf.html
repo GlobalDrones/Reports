@@ -27,106 +27,113 @@
             </div>
         </header>
 
-        {% if summary_paragraphs or summary_tasks_worked or summary_tasks_completed or summary_tasks_carryover %}
-        <section class="summary-block">
-            <h2>Resumo executivo</h2>
-            {% if summary_warning %}
-            <div class="summary-warning">{{ summary_warning }}</div>
-            {% endif %}
+        {# Page 1: Title + LLM summary #}
+        <section class="page page--cover">
+            <div class="cover-title-wrapper">
+                <h1 class="cover-title">{{ project_title if project_title else 'Relatório do Projeto' }}</h1>
+            </div>
             {% if summary_paragraphs %}
-            <div class="summary-text">
-                {% if summary_paragraphs[0] and (summary_paragraphs[0].startswith('Error') or 'Sorry' in summary_paragraphs[0]) %}
-                     <p><em>Resumo indisponível.</em></p>
-                {% else %}
-                    {% for paragraph in summary_paragraphs %}
-                    <p>{{ paragraph }}</p>
-                    {% endfor %}
-                {% endif %}
+            <div class="cover-llm-summary">
+                {% for para in summary_paragraphs %}
+                <p>{{ para }}</p>
+                {% endfor %}
             </div>
             {% endif %}
-            <div class="summary-tasks">
-                <div class="summary-tasks-grid">
-                    <div class="summary-task-card">
-                        <h3>Tarefas trabalhadas</h3>
-                        <table class="summary-task-table">
-                            <tbody>
-                                {% if summary_tasks_worked %}
-                                {% for task in summary_tasks_worked %}
-                                <tr>
-                                    <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
-                                </tr>
-                                {% endfor %}
-                                {% else %}
-                                <tr>
-                                    <td class="summary-empty">Sem tarefas iniciadas nesta semana.</td>
-                                </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="summary-task-card">
-                        <h3>Tarefas concluídas</h3>
-                        <table class="summary-task-table">
-                            <tbody>
-                                {% if summary_tasks_completed %}
-                                {% for task in summary_tasks_completed %}
-                                <tr>
-                                    <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
-                                </tr>
-                                {% endfor %}
-                                {% else %}
-                                <tr>
-                                    <td class="summary-empty">Sem tarefas concluídas nesta semana.</td>
-                                </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="summary-task-card">
-                        <h3>Em andamento</h3>
-                        <table class="summary-task-table">
-                            <tbody>
-                                {% if summary_tasks_carryover %}
-                                {% for task in summary_tasks_carryover %}
-                                <tr>
-                                    <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
-                                </tr>
-                                {% endfor %}
-                                {% else %}
-                                <tr>
-                                    <td class="summary-empty">Sem tarefas em andamento da semana passada.</td>
-                                </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </section>
-        {% endif %}
-
-        {% if summary_charts %}
-        <section class="summary-charts">
-            <h2>Indicadores do Projeto</h2>
-            <div class="chart-grid">
+            {% if summary_charts %}
+            <div class="chart-grid cover-chart-grid" style="margin-top:16px;">
                 {% for chart in summary_charts %}
                 <div class="chart-card">
                     <div class="chart-header">
                         <div class="chart-title">{{ chart.title }}</div>
                         <div class="chart-pill">{{ chart.pill }}</div>
                     </div>
-                    <div class="chart-metric">
-                        <div class="chart-value">{{ chart.value }}</div>
-                        <div class="chart-subtext">{{ chart.subtext }}</div>
+                    <div class="chart-stat" style="margin-top:6px;">
+                        <span class="chart-value-small">{{ chart.value }}</span>
+                        <span class="chart-subtext-inline">{{ chart.subtext }}</span>
                     </div>
-                    <div class="chart-svg">{{ chart.svg | safe }}</div>
+                    <div class="chart-svg small-chart" style="margin-top:8px;">{{ chart.svg | safe }}</div>
                 </div>
                 {% endfor %}
             </div>
+            {% endif %}
+        
         </section>
-        {% endif %}
+
+        {# Move summary indicators to cover page #}
+
+        <div style="page-break-after: always;"></div>
+
+        {# Page 2: Task tables side-by-side #}
+        <section class="page page--tasks">
+            <h2>Tarefas do Período</h2>
+            <div class="summary-tasks-grid">
+                <div class="summary-task-card">
+                    <h3>Tarefas iniciadas (esta semana)</h3>
+                    <table class="summary-task-table">
+                        <tbody>
+                            {% if summary_tasks_worked %}
+                            {% for task in summary_tasks_worked %}
+                            <tr>
+                                <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td class="summary-empty">Sem tarefas iniciadas nesta semana.</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="summary-task-card">
+                    <h3>Tarefas concluídas (esta semana)</h3>
+                    <table class="summary-task-table">
+                        <tbody>
+                            {% if summary_tasks_completed %}
+                            {% for task in summary_tasks_completed %}
+                            <tr>
+                                <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td class="summary-empty">Sem tarefas concluídas nesta semana.</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="summary-task-card">
+                    <h3>Tarefas trazidas (semana passada)</h3>
+                    <table class="summary-task-table">
+                        <tbody>
+                            {% if summary_tasks_carryover %}
+                            {% for task in summary_tasks_carryover %}
+                            <tr>
+                                <td><a href="{{ task.url }}">{{ task.title if task.title else 'Link' }}</a></td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td class="summary-empty">Sem tarefas trazadas da semana passada.</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <div style="page-break-after: always;"></div>
+
+        {# Page 3: Charts (summary indicators + project charts + tables) #}
+        <section class="page page--charts">
+            <h2>Indicadores do Projeto</h2>
+            {# summary_charts moved to cover page #}
+
+        {# summary_charts previously rendered here; moved into page--charts section to avoid duplication #}
 
         {% if milestone_section and False %}
         <section class="milestone-section">
@@ -207,11 +214,12 @@
         <section class="project-charts-section">
             <h2>Gráficos do Projeto</h2>
             
-            <div style="display:flex; gap:16px; align-items:flex-start; margin-bottom:16px;">
-                <div class="project-chart-card" style="flex:1;">
+            <div style="display:block; gap:16px; align-items:flex-start; margin-bottom:16px;">
+                <div class="project-chart-card" style="margin-bottom:18px;">
                     {{ project_charts.burnup_svg | safe }}
                 </div>
-                <div class="project-chart-card" style="flex:1;">
+
+                <div class="project-chart-card" style="margin-bottom:18px;">
                     {{ project_charts.weekly_progress_svg | safe }}
                 </div>
             </div>
@@ -228,6 +236,7 @@
                     <thead>
                         <tr>
                             <th>Backlog</th>
+                            <th>Blocked</th>
                             <th>Progress</th>
                             <th>Review</th>
                             <th>Done</th>
@@ -238,6 +247,7 @@
                     <tbody>
                         <tr>
                             <td>{{ project_charts.tables.weekly.backlog }}</td>
+                            <td>{{ project_charts.tables.weekly.blocked }}</td>
                             <td>{{ project_charts.tables.weekly.progress }}</td>
                             <td>{{ project_charts.tables.weekly.review }}</td>
                             <td>{{ project_charts.tables.weekly.done }}</td>
@@ -281,7 +291,9 @@
                     </tbody>
                 </table>
             </div>
-        </section>
+            </section>
+
+            </section>
         {% endif %}
 
     {% if reports_by_project %}
