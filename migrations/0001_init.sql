@@ -47,3 +47,28 @@ CREATE INDEX IF NOT EXISTS idx_reports_project_slug ON reports (project_slug);
 CREATE INDEX IF NOT EXISTS idx_reports_team_slug ON reports (team_slug);
 CREATE INDEX IF NOT EXISTS idx_tasks_report ON tasks (report_id);
 CREATE INDEX IF NOT EXISTS idx_delivery_files_report ON delivery_files (report_id);
+
+UPDATE reports
+SET project_slug = lower(replace(project_name, ' ', '-'))
+WHERE (project_slug IS NULL OR project_slug = '') AND project_name IS NOT NULL;
+
+UPDATE reports
+SET team_name = project_name
+WHERE (team_name IS NULL OR team_name = '') AND project_name IS NOT NULL;
+
+UPDATE reports
+SET team_slug = lower(replace(team_name, ' ', '-'))
+WHERE (team_slug IS NULL OR team_slug = '') AND team_name IS NOT NULL;
+
+UPDATE reports
+SET project_name = team_name
+WHERE (project_name IS NULL OR project_name = '') AND team_name IS NOT NULL;
+
+ALTER TABLE reports ADD COLUMN deliveries_link TEXT;
+ALTER TABLE tasks ADD COLUMN end_date TEXT;
+
+DROP TABLE IF EXISTS delivery_files;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_end_date ON tasks (end_date);
+
+ALTER TABLE tasks ADD COLUMN difficulty REAL;
