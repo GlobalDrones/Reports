@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import json
 import logging
-import math
 import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+import math
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-
-logger = logging.getLogger(__name__)
+import json
 
 GITHUB_COLORS = {
     "backlog": "#8B949E",
@@ -19,20 +17,24 @@ GITHUB_COLORS = {
     "progress": "#BF8700",
     "review": "#2188FF",
     "done": "#986EE2",
-    "no_status": "#8B949E",
+    "no_status": "#30363d",
     "duplicate": "#64748b",
+    "open_scope": "#238636",
 }
 
-CHART_WIDTH = 640
-CHART_HEIGHT = 220
+CHART_WIDTH = 800
+CHART_HEIGHT = 280
 CHART_PADDING = 50
-BG_COLOR = "white"
-GRID_COLOR = "#D0D7DE"
-TEXT_COLOR = "#24292F"
+BG_COLOR = "#e6edf3"
+TEXT_COLOR = "#0d1117"
+GRID_COLOR = "#30363d"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ProjectItem:
+    id: str
     created_at: datetime
     status: str
     status_updated_at: datetime | None
@@ -42,9 +44,13 @@ class ProjectItem:
     milestone: str | None
     difficulty: float
     estimate_hours: float
-    labels: list[str]
+    labels: List[str]
     content_type: str = "Issue"
     repository: str | None = None
+    is_archived: bool = False
+    content_state_reason: str | None = None
+    content_state: str | None = None
+    milestone_due: date | None = None
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -65,50 +71,6 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
-def _run_graphql(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]:
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    response = requests.post(
-        "https://api.github.com/graphql",
-        json={"query": query, "variables": variables},
-        headers=headers,
-        timeout=15,
-    )
-    if response.status_code != 200:
-        raise requests.RequestException(
-            f"GraphQL failed with {response.status_code}: {response.text}"
-        )
-    payload = response.json()
-    if "errors" in payload:
-        raise requests.RequestException(f"GraphQL errors: {payload['errors']}")
-    return payload
-
-
-def _bucket_status(status: str) -> str:
-    normalized = (status or "").strip().lower()
-    if not normalized:
-        return "no_status"
-    if any(key in normalized for key in ["cancel", "canceled", "cancelled"]):
-        return "cancelled"
-    if any(key in normalized for key in ["duplicate", "duplicado"]):
-        return "duplicate"
-    if any(key in normalized for key in ["done", "concl", "closed", "finalizado"]):
-        return "done"
-    if any(key in normalized for key in ["review", "revis", "qa"]):
-        return "review"
-    if any(key in normalized for key in ["progress", "andamento", "doing", "wip"]):
-        return "progress"
-    if any(key in normalized for key in ["blocked", "bloqueado", "imped"]):
-        return "blocked"
-    if any(
-        key in normalized for key in ["backlog", "todo", "pendente", "to do", "ready", "planning"]
-    ):
-        return "backlog"
-    return "backlog"
-
-
 def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
@@ -123,53 +85,57 @@ def _milestone_matches(value: str | None, target: str | None) -> bool:
     return _normalize_text(target) in _normalize_text(value)
 
 
-def _get_latest_milestone(items: list[ProjectItem]) -> str | None:
-    milestone_dates: dict[str, date] = {}
+def _bucket_status(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    if not normalized:
+        return "no_status"
 
-    for item in items:
-        if not item.milestone:
-            continue
-        milestone = item.milestone
-        item_date = item.iteration_end or item.created_at.date()
+    if any(k in normalized for k in ["cancel", "suspend", "abort", "abandon"]):
+        return "cancelled"
 
-        if milestone not in milestone_dates or item_date > milestone_dates[milestone]:
-            milestone_dates[milestone] = item_date
+    if "duplic" in normalized:
+        return "duplicate"
 
-    if not milestone_dates:
-        return None
+    if normalized in ["done", "concluído", "concluido", "finalizado", "closed", "entregue"]:
+        return "done"
+    if (
+        normalized.startswith("done")
+        or normalized.startswith("concl")
+        or normalized.startswith("closed")
+    ):
+        return "done"
 
-    latest_milestone = max(milestone_dates.items(), key=lambda x: x[1])
-    return latest_milestone[0]
+    if (
+        "revis" in normalized
+        or "review" in normalized
+        or "qa" in normalized
+        or "valid" in normalized
+    ):
+        return "review"
+
+    if (
+        "progres" in normalized
+        or "andamento" in normalized
+        or "doing" in normalized
+        or "wip" in normalized
+    ):
+        return "progress"
+
+    if "block" in normalized or "bloq" in normalized or "imped" in normalized:
+        return "blocked"
+
+    return "backlog"
 
 
-def _week_range(week_id: str | None) -> tuple[date, date] | None:
-    if not week_id:
-        return None
-    try:
-        year_str, week_str = week_id.split("-W")
-        start = date.fromisocalendar(int(year_str), int(week_str), 1)
-        end = start + timedelta(days=6)
-        return start, end
-    except Exception:
-        return None
-
-
-def _subtract_months(value: date, months: int) -> date:
-    year = value.year
-    month = value.month - months
-    while month <= 0:
-        month += 12
-        year -= 1
-    day = min(value.day, _days_in_month(year, month))
-    return date(year, month, day)
-
-
-def _days_in_month(year: int, month: int) -> int:
-    if month == 12:
-        next_month = date(year + 1, 1, 1)
-    else:
-        next_month = date(year, month + 1, 1)
-    return (next_month - timedelta(days=1)).day
+def _is_duplicate_item(item: ProjectItem) -> bool:
+    if _bucket_status(item.status) == "duplicate":
+        return True
+    labels = [l.lower() for l in item.labels]
+    if "duplicate" in labels or "duplicado" in labels:
+        return True
+    if item.content_state_reason and str(item.content_state_reason).upper() == "DUPLICATE":
+        return True
+    return False
 
 
 def _safe_float(value: Any) -> float:
@@ -179,65 +145,33 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
-def _normalize_field_name(name: str | None) -> str:
-    return (name or "").strip().lower()
-
-
-def _field_match(name: str | None, target: str | None) -> bool:
-    if not target:
-        return False
-    return _normalize_field_name(name) == _normalize_field_name(target)
-
-
-def _parse_numeric_from_text(value: str | None) -> float:
-    if not value:
-        return 0.0
-    match = re.search(r"-?\d+(?:[\.,]\d+)?", value)
-    if not match:
-        return 0.0
-    raw = match.group(0).replace(",", ".")
-    return _safe_float(raw)
-
-
 def _map_difficulty_label(label: str | None) -> float:
     if not label:
         return 0.0
     normalized = label.strip().upper()
+    match = re.search(r"(\d+([\.,]\d+)?)", normalized)
+    if match:
+        return _safe_float(match.group(1).replace(",", "."))
+
     scale_map = {
         "XS": 1.0,
         "S": 2.0,
         "M": 3.0,
-        "L": 4.0,
-        "XL": 5.0,
-        "P0": 5.0,
-        "P1": 4.0,
+        "L": 5.0,
+        "XL": 8.0,
+        "P0": 8.0,
+        "P1": 5.0,
         "P2": 3.0,
         "P3": 2.0,
         "P4": 1.0,
     }
-    for key, value in scale_map.items():
+    for key, val in scale_map.items():
         if normalized.startswith(key):
-            return value
-    return _parse_numeric_from_text(label)
+            return val
+    return 0.0
 
 
-def _is_duplicate_item(item: ProjectItem) -> bool:
-    if _bucket_status(item.status) == "duplicate":
-        return True
-    labels = [label.strip().lower() for label in (item.labels or [])]
-    return any(label in {"duplicate", "duplicado"} for label in labels)
-
-
-def fetch_project_items(
-    token: str,
-    project_id: str,
-    *,
-    status_field: str = "Status",
-    iteration_field: str = "Iteration",
-    milestone_field: str = "Milestone",
-    difficulty_field: str = "Dificuldade",
-    estimate_field: str = "Estimate (Hours)",
-) -> list[ProjectItem]:
+def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
     query = """
     query($projectId: ID!, $cursor: String) {
       node(id: $projectId) {
@@ -247,57 +181,26 @@ def fetch_project_items(
             nodes {
               id
               createdAt
-              fieldValues(first: 100) {
+              isArchived
+              fieldValues(first: 20) {
                 nodes {
-                                    __typename
-                                    ... on ProjectV2ItemFieldSingleSelectValue {
-                                        name
-                                        updatedAt
-                                        field { ... on ProjectV2FieldCommon { name } }
-                                    }
-                                    ... on ProjectV2ItemFieldNumberValue {
-                                        number
-                                        field { ... on ProjectV2FieldCommon { name } }
-                                    }
-                                    ... on ProjectV2ItemFieldTextValue {
-                                        text
-                                        field { ... on ProjectV2FieldCommon { name } }
-                                    }
-                                    ... on ProjectV2ItemFieldDateValue {
-                                        date
-                                        field { ... on ProjectV2FieldCommon { name } }
-                                    }
-                                    ... on ProjectV2ItemFieldMilestoneValue {
-                                        milestone { title }
-                                        field { ... on ProjectV2FieldCommon { name } }
-                                    }
-                                    ... on ProjectV2ItemFieldIterationValue {
-                                        iterationId
-                                        title
-                                        startDate
-                                        duration
-                                        field { ... on ProjectV2FieldCommon { name } }
-                                    }
+                  ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+                  ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { name } } }
+                  ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } }
+                  ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { name } } }
+                  ... on ProjectV2ItemFieldMilestoneValue { milestone { title dueOn } field { ... on ProjectV2FieldCommon { name } } }
+                  ... on ProjectV2ItemFieldIterationValue { 
+                    title startDate duration 
+                    field { ... on ProjectV2FieldCommon { name } } 
+                  }
                 }
               }
-              content {
-                __typename
-                ... on Issue {
-                  title
-                  createdAt
-                  labels(first: 50) { nodes { name } }
-                  repository { name }
-                }
-                ... on PullRequest {
-                  title
-                  createdAt
-                  labels(first: 50) { nodes { name } }
-                  repository { name }
-                }
-                ... on DraftIssue {
-                  title
-                }
-              }
+                            content {
+                                __typename
+                                ... on Issue { title state stateReason labels(first: 10) { nodes { name } } repository { name } closedAt updatedAt }
+                                ... on PullRequest { title labels(first: 10) { nodes { name } } repository { name } closedAt mergedAt updatedAt }
+                                ... on DraftIssue { title }
+                            }
             }
           }
         }
@@ -305,90 +208,113 @@ def fetch_project_items(
     }
     """
 
-    items: list[ProjectItem] = []
+    items = []
     cursor = None
-    while True:
-        payload = _run_graphql(query, {"projectId": project_id, "cursor": cursor}, token)
-        node = payload.get("data", {}).get("node", {}).get("items", {})
-        nodes = node.get("nodes", [])
-        page_info = node.get("pageInfo", {})
 
-        for item in nodes:
-            created_at = _parse_datetime(item.get("createdAt")) or datetime.utcnow()
+    FIELD_STATUS = "Status"
+    FIELD_DIFFICULTY = "Dificuldade"
+    FIELD_ITERATION = "Iteration"
+    FIELD_MILESTONE = "Milestone"
+    FIELD_ESTIMATE = "Estimate"
+
+    while True:
+        try:
+            resp = requests.post(
+                "https://api.github.com/graphql",
+                json={"query": query, "variables": {"projectId": project_id, "cursor": cursor}},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch GitHub items: {e}")
+            break
+
+        nodes = data.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
+        page_info = data.get("data", {}).get("node", {}).get("items", {}).get("pageInfo", {})
+
+        for node in nodes:
+            content = node.get("content") or {}
+            field_values = node.get("fieldValues", {}).get("nodes", [])
+
             status = ""
             status_updated_at = None
             iteration_title = None
             iteration_start = None
             iteration_end = None
-            milestone_value = None
-            difficulty_value = 0.0
-            estimate_value = 0.0
-            labels: list[str] = []
+            milestone = None
+            milestone_due = None
+            difficulty = 0.0
+            estimate = 0.0
 
-            content = item.get("content") or {}
-            content_type = content.get("__typename", "Issue")
-            repository_name = (content.get("repository") or {}).get("name")
-            if content_type == "PullRequest":
-                continue
-            label_nodes = (content.get("labels") or {}).get("nodes") or []
-            labels = [str(label.get("name", "")).strip() for label in label_nodes if label]
+            for fv in field_values:
+                f_name = fv.get("field", {}).get("name", "")
 
-            for field in (item.get("fieldValues") or {}).get("nodes", []):
-                field_name = (field.get("field") or {}).get("name")
-                field_type = field.get("__typename") or ""
+                if _normalize_text(f_name) == _normalize_text(FIELD_STATUS):
+                    status = fv.get("name") or ""
 
-                if _field_match(field_name, status_field):
-                    status = field.get("name") or status
-                    status_updated_at = _parse_datetime(field.get("updatedAt"))
+                elif _normalize_text(f_name) == _normalize_text(FIELD_DIFFICULTY):
+                    val = fv.get("number")
+                    if val is None:
+                        val = fv.get("name")
+                    if val is None:
+                        val = fv.get("text")
+                    difficulty = _map_difficulty_label(str(val)) if val else 0.0
 
-                if _field_match(field_name, iteration_field) and field.get("iterationId"):
-                    iteration_title = field.get("title")
-                    iteration_start = _parse_date(field.get("startDate"))
-                    duration = field.get("duration") or 0
-                    if iteration_start:
-                        iteration_end = iteration_start + timedelta(days=int(duration))
+                elif _normalize_text(f_name) == _normalize_text(FIELD_MILESTONE):
+                    if fv.get("milestone"):
+                        milestone = fv.get("milestone", {}).get("title")
+                        due_raw = fv.get("milestone", {}).get("dueOn")
+                        milestone_due = _parse_date(due_raw) if due_raw else None
+                    else:
+                        milestone = fv.get("title")
+                        milestone_due = None
 
-                if _field_match(field_name, milestone_field):
-                    if field_type == "ProjectV2ItemFieldSingleSelectValue":
-                        milestone_value = field.get("name") or milestone_value
-                    elif field_type == "ProjectV2ItemFieldTextValue":
-                        milestone_value = field.get("text") or milestone_value
-                    elif field_type == "ProjectV2ItemFieldMilestoneValue":
-                        milestone = field.get("milestone") or {}
-                        milestone_value = milestone.get("title") or milestone_value
+                elif _normalize_text(f_name) == _normalize_text(FIELD_ITERATION):
+                    iteration_title = fv.get("title")
+                    if fv.get("startDate"):
+                        iteration_start = _parse_date(fv.get("startDate"))
+                        duration = fv.get("duration", 0)
+                        iteration_end = iteration_start + timedelta(days=duration)
 
-                if _field_match(field_name, difficulty_field):
-                    if field_type == "ProjectV2ItemFieldNumberValue":
-                        difficulty_value = _safe_float(field.get("number"))
-                    elif field_type == "ProjectV2ItemFieldSingleSelectValue":
-                        difficulty_value = _map_difficulty_label(field.get("name"))
-                    elif field_type == "ProjectV2ItemFieldTextValue":
-                        difficulty_value = _map_difficulty_label(field.get("text"))
+            labels = []
+            lbl_nodes = (content.get("labels") or {}).get("nodes") or []
+            labels = [l.get("name") for l in lbl_nodes if l.get("name")]
 
-                if _field_match(field_name, estimate_field):
-                    if field_type == "ProjectV2ItemFieldNumberValue":
-                        estimate_value = _safe_float(field.get("number"))
-                    elif field_type == "ProjectV2ItemFieldTextValue":
-                        estimate_value = _parse_numeric_from_text(field.get("text"))
-                    elif field_type == "ProjectV2ItemFieldSingleSelectValue":
-                        estimate_value = _parse_numeric_from_text(field.get("name"))
+            created_at = _parse_datetime(node.get("createdAt")) or datetime.now()
 
-            items.append(
-                ProjectItem(
-                    created_at=created_at,
-                    status=status,
-                    status_updated_at=status_updated_at,
-                    iteration_title=iteration_title,
-                    iteration_start=iteration_start,
-                    iteration_end=iteration_end,
-                    milestone=milestone_value,
-                    difficulty=difficulty_value,
-                    estimate_hours=estimate_value,
-                    labels=labels,
-                    content_type=content_type,
-                    repository=repository_name,
+            content_closed_at = None
+            content_updated_at = None
+            if content.get("__typename") == "Issue":
+                content_closed_at = _parse_datetime(content.get("closedAt"))
+                content_updated_at = _parse_datetime(content.get("updatedAt"))
+            elif content.get("__typename") == "PullRequest":
+                content_closed_at = _parse_datetime(
+                    content.get("closedAt") or content.get("mergedAt")
                 )
+                content_updated_at = _parse_datetime(content.get("updatedAt"))
+
+            item = ProjectItem(
+                id=node.get("id"),
+                created_at=created_at,
+                status=status,
+                status_updated_at=(content_closed_at or content_updated_at),
+                iteration_title=iteration_title,
+                iteration_start=iteration_start,
+                iteration_end=iteration_end,
+                milestone=milestone,
+                milestone_due=milestone_due,
+                difficulty=difficulty,
+                estimate_hours=estimate,
+                labels=labels,
+                content_type=content.get("__typename", "Issue"),
+                repository=(content.get("repository") or {}).get("name"),
+                is_archived=node.get("isArchived", False),
+                content_state_reason=content.get("stateReason"),
+                content_state=content.get("state"),
             )
+            items.append(item)
 
         if not page_info.get("hasNextPage"):
             break
@@ -397,719 +323,519 @@ def fetch_project_items(
     return items
 
 
-def _percent(value: float, total: float) -> int:
-    if total <= 0:
-        return 0
-    return int(round((value / total) * 100))
+def _svg_header(title: str) -> str:
+    return f"""<text x="{CHART_PADDING}" y="25" font-size="16" fill="{TEXT_COLOR}" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">{title}</text>"""
 
 
-def _line_chart_svg(
-    dates: list[date],
-    series: dict[str, list[float]],
-    colors: dict[str, str],
+def _burnup_chart_svg(
+    dates: List[date],
+    scope_series: List[float],
+    completed_series: List[float],
+    duplicate_series: List[float] | None,
     title: str,
-    y_label: str = "",
-    x_label: str = "",
+    final_open: int | None = None,
+    final_done: int | None = None,
+    final_dup: int | None = None,
 ) -> str:
     if not dates:
         return ""
 
-    padding = CHART_PADDING
+    width, height = CHART_WIDTH, CHART_HEIGHT
+    pad = CHART_PADDING
 
-    legend_keys = list(colors.keys())
-    legend_start_y = 20
-    legend_height = len(legend_keys) * 14
-    legend_bottom = legend_start_y + legend_height
+    raw_max = max(max(scope_series), 1)
+    max_y = math.ceil(raw_max * 1.05 / 50) * 50
 
-    top_offset = max(padding, legend_bottom + 10)
+    def get_y(val):
+        return height - pad - (val / max_y * (height - 2 * pad))
 
-    extra_height = max(0, top_offset - padding)
-    height = CHART_HEIGHT + extra_height
-    width = CHART_WIDTH
+    def get_x(idx):
+        return pad + (idx / (len(dates) - 1) * (width - 2 * pad))
 
-    max_value = max(max(values) for values in series.values()) if series else 1
-    max_value = max(max_value, 1)
+    scope_points = []
+    completed_points = []
+    duplicate_points = []
 
-    num_points = len(dates)
-    if num_points < 2:
-        x_step = width - padding * 2
-    else:
-        x_step = (width - padding * 2) / (num_points - 1)
+    for i, d in enumerate(dates):
+        x = get_x(i)
+        y_scope = get_y(scope_series[i])
+        y_done = get_y(completed_series[i])
+        y_dup = get_y(duplicate_series[i]) if duplicate_series else get_y(0)
+        scope_points.append(f"{x:.1f},{y_scope:.1f}")
+        completed_points.append(f"{x:.1f},{y_done:.1f}")
+        duplicate_points.append(f"{x:.1f},{y_dup:.1f}")
 
-    def _x(idx: int) -> float:
-        return padding + idx * x_step
-
-    def _y(value: float) -> float:
-        plot_height = height - padding - top_offset
-        return height - padding - (value / max_value) * plot_height
-
-    lines = []
-    for key, values in series.items():
-        points = [f"{_x(i):.2f},{_y(v):.2f}" for i, v in enumerate(values)]
-        lines.append(
-            f"<polyline fill='none' stroke='{colors.get(key, '#8B949E')}' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' "
-            f"points='{' '.join(points)}'/>"
-        )
-
-    axis = (
-        f"<line x1='{padding}' y1='{height - padding}' x2='{width - padding}' y2='{height - padding}' stroke='{GRID_COLOR}' />"
-        f"<line x1='{padding}' y1='{top_offset}' x2='{padding}' y2='{height - padding}' stroke='{GRID_COLOR}' />"
-        f"<text x='{padding}' y='{top_offset - 8}' font-size='10' fill='{TEXT_COLOR}'>{max_value:.0f}</text>"
-        f"<text x='{padding}' y='{height - padding + 16}' font-size='10' fill='{TEXT_COLOR}'>0</text>"
+    done_area_path = (
+        f"M {pad},{height - pad} "
+        + " ".join([f"L {p}" for p in completed_points])
+        + f" L {get_x(len(dates) - 1)},{height - pad} Z"
     )
 
-    x_labels = ""
-    try:
-        num_points = len(dates)
-        step = max(1, num_points // 6)
-        for i, d in enumerate(dates):
-            if i % step == 0 or i == num_points - 1:
-                label = d.strftime("%d/%m") if hasattr(d, 'strftime') else str(d)
-                x_labels += f"<text x='{_x(i):.2f}' y='{height - padding + 28}' text-anchor='middle' font-size='10' fill='{TEXT_COLOR}'>{label}</text>"
-    except Exception:
-        x_labels = ""
+    scope_area_path = (
+        f"M {pad},{height - pad} "
+        + " ".join([f"L {p}" for p in scope_points])
+        + f" L {get_x(len(dates) - 1)},{height - pad} Z"
+    )
 
+    dup_line = f"M " + " ".join([f"{p}" for p in duplicate_points])
+
+    scope_line = f"M " + " ".join([f"{p}" for p in scope_points])
+    done_line = f"M " + " ".join([f"{p}" for p in completed_points])
+    dup_line = dup_line
+
+    x_labels_svg = ""
+    step = max(1, len(dates) // 8)
+    for i in range(0, len(dates), step):
+        x_labels_svg += f'<text x="{get_x(i):.1f}" y="{height - pad + 20}" font-size="10" fill="{TEXT_COLOR}" text-anchor="middle">{dates[i].strftime("%d/%b")}</text>'
+
+    last_idx = len(dates) - 1
+    last_x = get_x(last_idx)
+    last_scope_val = scope_series[-1] if scope_series else 0
+    last_done_val = completed_series[-1] if completed_series else 0
+    last_dup_val = duplicate_series[-1] if (duplicate_series and len(duplicate_series) > 0) else 0
+    last_scope_y = get_y(last_scope_val)
+    last_done_y = get_y(last_done_val)
+    display_scope = int(final_open) if final_open is not None else int(last_scope_val)
+    display_done = int(final_done) if final_done is not None else int(last_done_val)
+    last_values_svg = (
+        f'<text x="{last_x + 8:.1f}" y="{last_scope_y - 6:.1f}" font-size="11" fill="{GITHUB_COLORS["open_scope"]}" font-weight="600">{display_scope}</text>'
+        + f'<text x="{last_x + 8:.1f}" y="{last_done_y + 4:.1f}" font-size="11" fill="{GITHUB_COLORS["done"]}" font-weight="600">{display_done}</text>'
+        + f'<text x="{last_x + 8:.1f}" y="{get_y(last_dup_val) + 14:.1f}" font-size="11" fill="#9ca3af" font-weight="600">{int(final_dup) if final_dup is not None else int(last_dup_val)}</text>'
+    )
+
+    legend_items = [("open_scope", "Open Scope"), ("done", "Completed"), ("duplicate", "Duplicate")]
     legend_svg = ""
-    legend_x = width - 120
-    curr_y = legend_start_y
-    for key, color in colors.items():
-        legend_svg += (
-            f"<rect x='{legend_x}' y='{curr_y}' width='10' height='10' fill='{color}' rx='2'/>"
-            f"<text x='{legend_x + 14}' y='{curr_y + 9}' font-size='10' fill='{TEXT_COLOR}'>{key}</text>"
-        )
-        curr_y += 14
+    for idx, (key, label) in enumerate(legend_items):
+        cx = width - 360 + idx * 90
+        tx = width - 350 + idx * 90
+        color = GITHUB_COLORS.get(key, "#9ca3af")
+        legend_svg += f'<circle cx="{cx:.0f}" cy="30" r="4" fill="{color}"/>'
+        legend_svg += f'<text x="{tx:.0f}" y="34" font-size="12" fill="{TEXT_COLOR}">{label}</text>'
 
-    return (
-        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>"
-        f"<rect width='{width}' height='{height}' fill='{BG_COLOR}'/>"
-        f"<text x='{padding}' y='20' font-size='13' fill='{TEXT_COLOR}' font-weight='700' font-family='sans-serif'>{title}</text>"
-        f"{axis}{''.join(lines)}{legend_svg}{x_labels}"
-        f"</svg>"
-    )
+    return f"""
+    <svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+        {_svg_header(title)}
+        
+        <line x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{height - pad}" stroke="{GRID_COLOR}" stroke-width="1"/>
+        <line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height - pad}" stroke="{GRID_COLOR}" stroke-width="1"/>
+        
+        <text x="{pad - 10}" y="{pad}" font-size="10" fill="{TEXT_COLOR}" text-anchor="end">{int(max_y)}</text>
+        <text x="{pad - 10}" y="{height - pad}" font-size="10" fill="{TEXT_COLOR}" text-anchor="end">0</text>
+        
+        <path d="{scope_area_path}" fill="{GITHUB_COLORS["open_scope"]}" opacity="0.2"/>
+        <path d="{done_area_path}" fill="{GITHUB_COLORS["done"]}" opacity="0.3"/>
+
+        <path d="{scope_line}" fill="none" stroke="{GITHUB_COLORS["open_scope"]}" stroke-width="2"/>
+        <path d="{done_line}" fill="none" stroke="{GITHUB_COLORS["done"]}" stroke-width="2"/>
+        <path d="{dup_line}" fill="none" stroke="#9ca3af" stroke-width="2" stroke-dasharray="4 4" opacity="0.9"/>
+        
+        {x_labels_svg}
+        
+           <!-- Legend: compute positions with extra spacing to avoid overlap -->
+           {legend_svg}
+           {last_values_svg}
+    </svg>
+    """
 
 
-def _stacked_bar_svg(
-    labels: list[str],
-    stacks: dict[str, list[float]],
-    colors: dict[str, str],
+def _horizontal_stacked_bar_svg(
+    labels: List[str],
+    data: Dict[str, List[float]],
     title: str,
-    y_label: str = "",
-    x_label: str = "",
 ) -> str:
-    width = CHART_WIDTH
-    padding = CHART_PADDING
-    left_padding = 320
-
     bar_height = 20
-    gap = 12
+    gap = 10
+    top_margin = 50
+    left_margin = 250
 
-    used_keys = [k for k in colors.keys() if k in stacks and any(v > 0 for v in stacks[k])]
+    chart_h = top_margin + len(labels) * (bar_height + gap) + 30
+    width = CHART_WIDTH
 
-    legend_start_y = 16
-    legend_height = len(used_keys) * 14
-    legend_bottom = legend_start_y + legend_height
+    max_total = 0
+    for l in labels:
+        row = data.get(l, {}) or {}
+        try:
+            row_sum = sum(float(v) for v in (row.values() if isinstance(row, dict) else row))
+        except Exception:
+            row_sum = 0
+        max_total = max(max_total, row_sum)
 
-    top_offset = max(padding, legend_bottom + 10)
+    max_total = max(max_total, 1)
+    scale_x = (width - left_margin - CHART_PADDING) / max_total
 
-    height = top_offset + len(labels) * (bar_height + gap) + 30
-
-    max_total = 1
-    totals = []
-    for i in range(len(labels)):
-        total = sum(stacks[key][i] for key in stacks)
-        totals.append(total)
-        max_total = max(max_total, total)
-
-    bars = []
-    chart_draw_width = width - left_padding - padding
+    bars_svg = ""
+    status_order = [
+        "done",
+        "review",
+        "progress",
+        "backlog",
+    ]
+    plot_order = ["backlog", "progress", "review", "done"]
 
     for i, label in enumerate(labels):
-        y = top_offset + i * (bar_height + gap) + 10
-        y = top_offset + i * (bar_height + gap)
+        y = top_margin + i * (bar_height + gap)
+        vals = data[label]
 
-        x = left_padding
+        bars_svg += f'<text x="{left_margin - 10}" y="{y + 14}" font-size="11" fill="{TEXT_COLOR}" text-anchor="end">{label[:40]}</text>'
 
-        bars.append(
-            f"<text x='{left_padding - 10}' y='{y + 14}' text-anchor='end' font-size='11' fill='{TEXT_COLOR}'>{label}</text>"
-        )
+        current_x = left_margin
 
-        for key, values in stacks.items():
-            value = values[i]
-            if value <= 0:
-                continue
+        row_data = data.get(label, {}) or {}
 
-            if max_total > 0:
-                width_value = (value / max_total) * chart_draw_width
-            else:
-                width_value = 0
-
-            bars.append(
-                f"<rect x='{x:.2f}' y='{y}' width='{width_value:.2f}' height='{bar_height}' fill='{colors.get(key, '#8B949E')}' rx='4' />"
-            )
-            if width_value > 24 and value > 0:
-                text_x = x + width_value / 2
-                bars.append(
-                    f"<text x='{text_x:.2f}' y='{y + 14}' text-anchor='middle' font-size='10' fill='white' font-weight='600'>{int(value)}</text>"
-                )
-            x += width_value
-
-        if totals[i] > 0:
-            bars.append(
-                f"<text x='{x + 6:.2f}' y='{y + 14}' text-anchor='start' font-size='10' fill='{TEXT_COLOR}'>{int(totals[i])}</text>"
-            )
+        for st in plot_order:
+            try:
+                val = float(row_data.get(st, 0) or 0)
+            except Exception:
+                val = 0.0
+            if val > 0:
+                seg_width = val * scale_x
+                color = GITHUB_COLORS.get(st, "#333")
+                bars_svg += f'<rect x="{current_x}" y="{y}" width="{seg_width}" height="{bar_height}" fill="{color}" rx="2"/>'
+                if seg_width > 15:
+                    bars_svg += f'<text x="{current_x + seg_width / 2}" y="{y + 14}" font-size="9" fill="white" text-anchor="middle">{int(val)}</text>'
+                current_x += seg_width
 
     legend_svg = ""
-    legend_x = width - 120
-    legend_y = legend_start_y
-    for key in used_keys:
-        color = colors.get(key, "#8B949E")
-        legend_svg += (
-            f"<rect x='{legend_x}' y='{legend_y}' width='10' height='10' fill='{color}' rx='2'/>"
-            f"<text x='{legend_x + 14}' y='{legend_y + 9}' font-size='9' fill='{TEXT_COLOR}'>{key.capitalize()}</text>"
-        )
-        legend_y += 14
+    lx = width - 250
+    for idx, st in enumerate(plot_order):
+        c = GITHUB_COLORS.get(st)
+        legend_svg += f'<rect x="{lx + idx * 60}" y="20" width="10" height="10" fill="{c}" rx="2"/>'
+        legend_svg += f'<text x="{lx + idx * 60 + 14}" y="29" font-size="10" fill="{TEXT_COLOR}">{st.capitalize()}</text>'
 
-    return (
-        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>"
-        f"<rect width='{width}' height='{height}' fill='{BG_COLOR}'/>"
-        f"<text x='{padding}' y='20' font-size='13' fill='{TEXT_COLOR}' font-weight='700' font-family='sans-serif'>{title}</text>"
-        f"{''.join(bars)}{legend_svg}"
-        f"</svg>"
-    )
+    return f"""
+    <svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{chart_h}" viewBox="0 0 {width} {chart_h}">
+        {_svg_header(title)}
+        {legend_svg}
+        {bars_svg}
+    </svg>
+    """
 
 
-def _bar_chart_svg(
-    categories: list[str],
-    values: list[float],
-    title: str,
-    color: str,
-    y_label: str = "",
-    x_label: str = "",
+def _simple_bar_chart_svg(
+    categories: List[str], values: List[float], colors: List[str], title: str, y_label: str
 ) -> str:
-    width = CHART_WIDTH
-    height = CHART_HEIGHT
-    padding = CHART_PADDING
-    max_value = max(max(values), 1) if values else 1
-    bar_width = (width - padding * 2) / max(1, len(categories))
+    width, height = CHART_WIDTH, CHART_HEIGHT
+    pad = CHART_PADDING
 
-    bars = []
-    for i, value in enumerate(values):
-        x = padding + i * bar_width + 6
-        bar_height = (value / max_value) * (height - padding * 2)
-        y = height - padding - bar_height
-        bars.append(
-            f"<rect x='{x:.2f}' y='{y:.2f}' width='{bar_width - 12:.2f}' height='{bar_height:.2f}' fill='{color}' rx='4' />"
-        )
-        if value is not None:
-            try:
-                label_y = y - 6
-                if label_y < padding + 8:
-                    label_y = y + 12
-                bars.append(
-                    f"<text x='{x + (bar_width - 12) / 2:.2f}' y='{label_y:.2f}' text-anchor='middle' font-size='10' fill='{TEXT_COLOR}' font-weight='700'>{int(value)}</text>"
-                )
-            except Exception:
-                pass
-        cat_label = categories[i]
-        if len(categories) > 8 and len(cat_label) > 10:
-            cat_label = cat_label[:8] + ".."
+    max_val = max(max(values), 1)
+    bar_w = (width - 2 * pad) / len(categories) * 0.6
+    gap = (width - 2 * pad) / len(categories) * 0.4
 
-        bars.append(
-            f"<text x='{x + (bar_width - 12) / 2:.2f}' y='{height - padding + 14}' text-anchor='middle' font-size='10' fill='{TEXT_COLOR}'>{cat_label}</text>"
-        )
+    bars = ""
+    for i, (cat, val) in enumerate(zip(categories, values)):
+        h = (val / max_val) * (height - 2 * pad)
+        x = pad + i * (bar_w + gap) + gap / 2
+        y = height - pad - h
 
-    axis = (
-        f"<line x1='{padding}' y1='{height - padding}' x2='{width - padding}' y2='{height - padding}' stroke='{GRID_COLOR}' />"
-        f"<line x1='{padding}' y1='{padding}' x2='{padding}' y2='{height - padding}' stroke='{GRID_COLOR}' />"
-        f"<text x='{padding}' y='{padding - 8}' font-size='10' fill='{TEXT_COLOR}'>{max_value:.0f}</text>"
-    )
+        bars += f'<rect x="{x}" y="{y}" width="{bar_w}" height="{h}" fill="{colors[i]}" rx="4"/>'
+        bars += f'<text x="{x + bar_w / 2}" y="{y - 5}" font-size="11" fill="{TEXT_COLOR}" text-anchor="middle" font-weight="bold">{int(val) if val.is_integer() else f"{val:.1f}"}</text>'
+        bars += f'<text x="{x + bar_w / 2}" y="{height - pad + 15}" font-size="11" fill="{TEXT_COLOR}" text-anchor="middle">{cat}</text>'
 
-    params_svg = ""
-    if y_label:
-        params_svg += f"<text x='15' y='{height / 2}' transform='rotate(-90 15,{height / 2})' text-anchor='middle' font-size='11' fill='{TEXT_COLOR}' font-weight='bold'>{y_label}</text>"
-    if x_label:
-        params_svg += f"<text x='{width / 2}' y='{height - 10}' text-anchor='middle' font-size='11' fill='{TEXT_COLOR}' font-weight='bold'>{x_label}</text>"
-
-    return (
-        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>"
-        f"<rect width='{width}' height='{height}' fill='{BG_COLOR}'/>"
-        f"<text x='{padding}' y='20' font-size='13' fill='{TEXT_COLOR}' font-weight='700' font-family='sans-serif'>{title}</text>"
-        f"{axis}{' '.join(bars)}{params_svg}"
-        f"</svg>"
-    )
-
-
-def _multi_color_bar_chart_svg(
-    categories: list[str],
-    values: list[float],
-    colors_list: list[str],
-    title: str,
-    y_label: str = "",
-    x_label: str = "",
-) -> str:
-    padding = CHART_PADDING
-
-    legend_start_y = 16
-    shown_categories = categories[:6]
-    legend_height = len(shown_categories) * 14
-    legend_bottom = legend_start_y + legend_height
-
-    top_offset = max(padding, legend_bottom + 10)
-    extra_height = max(0, top_offset - padding)
-
-    width = CHART_WIDTH
-    height = CHART_HEIGHT + extra_height
-
-    max_value = max(max(values), 1) if values else 1
-    bar_width = (width - padding * 2) / max(1, len(categories))
-
-    bars = []
-    for i, value in enumerate(values):
-        x = padding + i * bar_width + 6
-        plot_height = height - padding - top_offset
-
-        bar_height = (value / max_value) * plot_height
-        y = height - padding - bar_height
-        color = colors_list[i] if i < len(colors_list) else "#8B949E"
-
-        bars.append(
-            f"<rect x='{x:.2f}' y='{y:.2f}' width='{bar_width - 12:.2f}' height='{bar_height:.2f}' fill='{color}' rx='4' />"
-        )
-        if value is not None and value > 0:
-            try:
-                text_x = x + (bar_width - 12) / 2
-                text_y = y + bar_height / 2 + 4
-                if text_y > height - padding - 10:
-                    text_y = height - padding - 10
-                text_color = TEXT_COLOR
-                bars.append(
-                    f"<text x='{text_x:.2f}' y='{text_y:.2f}' text-anchor='middle' font-size='10' fill='{text_color}' font-weight='700'>{int(value)}</text>"
-                )
-            except Exception:
-                pass
-        bars.append(
-            f"<text x='{x + (bar_width - 12) / 2:.2f}' y='{height - padding + 14}' text-anchor='middle' font-size='10' fill='{TEXT_COLOR}'>{categories[i]}</text>"
-        )
-
-    axis = (
-        f"<line x1='{padding}' y1='{height - padding}' x2='{width - padding}' y2='{height - padding}' stroke='{GRID_COLOR}' />"
-        f"<line x1='{padding}' y1='{top_offset}' x2='{padding}' y2='{height - padding}' stroke='{GRID_COLOR}' />"
-        f"<text x='{padding}' y='{top_offset - 8}' font-size='10' fill='{TEXT_COLOR}'>{max_value:.0f}</text>"
-    )
-
-    params_svg = ""
-    if y_label:
-        params_svg += f"<text x='15' y='{height / 2}' transform='rotate(-90 15,{height / 2})' text-anchor='middle' font-size='11' fill='{TEXT_COLOR}' font-weight='bold'>{y_label}</text>"
-    if x_label:
-        params_svg += f"<text x='{width / 2}' y='{height - 10}' text-anchor='middle' font-size='11' fill='{TEXT_COLOR}' font-weight='bold'>{x_label}</text>"
-
-    legend_svg = ""
-    legend_x = width - 120
-    legend_y = legend_start_y
-    for i, category in enumerate(categories):
-        if i >= 6:
-            break
-        color = colors_list[i] if i < len(colors_list) else "#8B949E"
-        legend_svg += (
-            f"<rect x='{legend_x}' y='{legend_y}' width='10' height='10' fill='{color}' rx='2'/>"
-            f"<text x='{legend_x + 14}' y='{legend_y + 9}' font-size='9' fill='{TEXT_COLOR}'>{category}</text>"
-        )
-        legend_y += 14
-
-    return (
-        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>"
-        f"<rect width='{width}' height='{height}' fill='{BG_COLOR}'/>"
-        f"<text x='{padding}' y='20' font-size='13' fill='{TEXT_COLOR}' font-weight='700' font-family='sans-serif'>{title}</text>"
-        f"{axis}{' '.join(bars)}{params_svg}{legend_svg}"
-        f"</svg>"
-    )
+    return f"""
+    <svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+        {_svg_header(title)}
+        <line x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{height - pad}" stroke="{GRID_COLOR}"/>
+        <text x="15" y="{height / 2}" transform="rotate(-90 15,{height / 2})" font-size="12" fill="{TEXT_COLOR}" text-anchor="middle">{y_label}</text>
+        {bars}
+    </svg>
+    """
 
 
 def load_project_charts(
-    token: str | None,
-    project_id: str | None,
-    *,
-    week_id: str | None = None,
-    milestone_month: str | None = None,
+    token: str,
+    project_id: str,
+    milestone_month: str = "Março",
     reference_date: date | None = None,
-) -> dict[str, Any] | None:
-    status_field = "Status"
-    iteration_field = "Iteration"
-    milestone_field = "Milestone"
-    difficulty_field = "Dificuldade"
-    estimate_field = "Estimate (Hours)"
-    if not token or not project_id:
-        return None
+    milestone_label: str | None = None,
+) -> dict[str, Any]:
+    if not reference_date:
+        reference_date = date.today()
 
-    try:
-        items = fetch_project_items(
-            token,
-            project_id,
-            status_field=status_field,
-            iteration_field=iteration_field,
-            milestone_field=milestone_field,
-            difficulty_field=difficulty_field,
-            estimate_field=estimate_field,
-        )
-    except requests.RequestException:
-        logger.exception("github.project.fetch_failed")
-        return None
+    raw_items = fetch_project_items(token, project_id)
 
-    all_items = items
-
-    if not milestone_month:
-        milestone_month = _get_latest_milestone(items)
-        logger.info(f"Auto-detected latest milestone: {milestone_month}")
-
-    if milestone_month:
-        items = [
-            item
-            for item in items
-            if item.milestone and _milestone_matches(item.milestone, milestone_month)
-        ]
-
-    if reference_date:
-        items = [item for item in items if item.created_at.date() <= reference_date]
-
-    if not items:
-        return None
-
-    milestone_end_date = None
-    if items:
-        milestone_end_date = max(
-            (item.iteration_end or item.created_at.date()) for item in items
-        )
-    burnup_end_date = reference_date or milestone_end_date
-    burnup_start_date = None
-    if burnup_end_date:
-        burnup_start_date = _subtract_months(burnup_end_date, 5)
-
-    date_counts = {}
-    completed_counts = {}
-    for item in items:
-        status_key = _bucket_status(item.status)
-        if status_key == "cancelled":
+    active_items: List[ProjectItem] = []
+    for item in raw_items:
+        if item.is_archived:
             continue
-        scope_day = item.created_at.date()
+        if item.content_type == "DraftIssue":
+            continue
+        if item.content_type == "PullRequest":
+            continue
+        if _bucket_status(item.status) == "cancelled":
+            continue
+        if item.content_state_reason and str(item.content_state_reason).upper() == "NOT_PLANNED":
+            continue
+        if milestone_month and not _milestone_matches(item.milestone, milestone_month):
+            continue
+        active_items.append(item)
 
-        if burnup_start_date and scope_day < burnup_start_date:
+    if not active_items:
+        return {}
+
+    milestone_dues = [it.milestone_due for it in active_items if getattr(it, "milestone_due", None)]
+    end_date = min(milestone_dues) if milestone_dues else reference_date
+    created_dates = [it.created_at.date() for it in active_items if getattr(it, "created_at", None)]
+    start_date = min(created_dates) if created_dates else (end_date - timedelta(days=30))
+    if start_date > end_date:
+        start_date = end_date - timedelta(days=30)
+
+    events_pts: List[Tuple[date, str, float]] = []
+    for item in active_items:
+        try:
+            created_day = item.created_at.date()
+        except Exception:
             continue
-        if burnup_end_date and scope_day > burnup_end_date:
+        if created_day > end_date:
             continue
-        date_counts[scope_day] = date_counts.get(scope_day, 0.0) + (item.difficulty or 0.0)
-        if _is_duplicate_item(item) and item.status_updated_at:
+        events_pts.append((created_day, "scope", item.difficulty))
+
+        is_dup_item = _is_duplicate_item(item)
+
+        is_done_column = _bucket_status(item.status) == "done"
+        if is_done_column and item.status_updated_at and not is_dup_item:
             done_day = item.status_updated_at.date()
-            if burnup_start_date and done_day < burnup_start_date:
-                continue
-            if burnup_end_date and done_day > burnup_end_date:
-                continue
-            completed_counts[done_day] = completed_counts.get(done_day, 0.0) + 0.0
-        if status_key == "done" and item.status_updated_at:
-            done_day = item.status_updated_at.date()
-            if burnup_start_date and done_day < burnup_start_date:
-                continue
-            if burnup_end_date and done_day > burnup_end_date:
-                continue
-            completed_counts[done_day] = completed_counts.get(done_day, 0.0) + (
-                item.difficulty or 0.0
-            )
+            if done_day <= end_date:
+                events_pts.append((done_day, "done", item.difficulty))
 
-    duplicate_counts = {}
-    for item in items:
-        if not _is_duplicate_item(item):
-            continue
-        day = (item.status_updated_at or item.created_at).date()
-        if reference_date and day > reference_date:
-            continue
-        if burnup_start_date and day < burnup_start_date:
-            continue
-        if burnup_end_date and day > burnup_end_date:
-            continue
-        duplicate_counts[day] = duplicate_counts.get(day, 0.0) + (item.difficulty or 0.0)
+        if is_dup_item:
+            dup_day = (item.status_updated_at or item.created_at).date()
+            if dup_day <= end_date:
+                events_pts.append((dup_day, "dup", item.difficulty))
 
-    all_dates = sorted(
-        set(date_counts.keys()) | set(completed_counts.keys()) | set(duplicate_counts.keys())
-    )
-    if burnup_start_date:
-        all_dates = [d for d in all_dates if d >= burnup_start_date]
-    if burnup_end_date:
-        all_dates = [d for d in all_dates if d <= burnup_end_date]
-    cumulative_scope = []
-    cumulative_done = []
-    cumulative_duplicate = []
-    scope_total = 0.0
-    done_total = 0.0
-    duplicate_total = 0.0
-    for day in all_dates:
-        scope_total += date_counts.get(day, 0.0)
-        done_total += completed_counts.get(day, 0.0)
-        duplicate_total += duplicate_counts.get(day, 0.0)
-        cumulative_scope.append(scope_total)
-        cumulative_done.append(done_total)
-        cumulative_duplicate.append(duplicate_total)
+    events_pts.sort(key=lambda x: x[0])
 
-    burnup_svg = _line_chart_svg(
-        all_dates,
-        {
-            "Open": cumulative_scope,
-            "Completed": cumulative_done,
-            "Duplicate": cumulative_duplicate,
-        },
-        {"Open": "#4ade80", "Completed": "#a855f7", "Duplicate": "#64748b"},
-        "BurnUp Milestone",
-        y_label="Pontos",
-        x_label="Tempo",
+    burnup_dates: List[date] = []
+    burnup_scope_pts: List[float] = []
+    burnup_done_pts: List[float] = []
+    burnup_dup_pts: List[float] = []
+
+    scope_acc = done_acc = dup_acc = 0.0
+    curr_date = start_date
+    idx = 0
+    while curr_date <= end_date:
+        while idx < len(events_pts) and events_pts[idx][0] <= curr_date:
+            _, tipo, val = events_pts[idx]
+            if tipo == "scope":
+                scope_acc += val
+            elif tipo == "done":
+                done_acc += val
+            elif tipo == "dup":
+                dup_acc += val
+            idx += 1
+
+        burnup_dates.append(curr_date)
+        burnup_scope_pts.append(scope_acc)
+        burnup_done_pts.append(done_acc)
+        burnup_dup_pts.append(dup_acc)
+        curr_date += timedelta(days=1)
+
+    def _is_strictly_done(it: ProjectItem) -> bool:
+        if _bucket_status(it.status) == "done":
+            return True
+        return False
+
+    total_scope_pts = sum(it.difficulty for it in active_items if it.created_at.date() <= end_date)
+    total_dup_pts = sum(it.difficulty for it in active_items if _is_duplicate_item(it))
+    total_done_pts = sum(
+        it.difficulty for it in active_items if _is_strictly_done(it) and not _is_duplicate_item(it)
     )
 
-    today = reference_date or date.today()
-    iterations_source = all_items
-    iterations = [item for item in iterations_source if item.iteration_start]
-    current_iteration = None
-    if iterations:
-        upcoming = [
-            item for item in iterations if item.iteration_end and item.iteration_end >= today
-        ]
-        if upcoming:
-            current_iteration = min(upcoming, key=lambda x: x.iteration_end)
-        else:
-            current_iteration = max(iterations, key=lambda x: x.iteration_start)
+    if burnup_scope_pts:
+        burnup_scope_pts[-1] = total_scope_pts
+        burnup_done_pts[-1] = total_done_pts
+        burnup_dup_pts[-1] = total_dup_pts
 
-    iteration_title = current_iteration.iteration_title if current_iteration else None
+    scope_series = burnup_scope_pts
 
-    filtered_items = items
+    final_open_display = int(total_scope_pts - total_done_pts - total_dup_pts)
+    final_done_display = int(total_done_pts)
+    final_dup_display = int(total_dup_pts)
 
-    status_totals = {key: 0.0 for key in GITHUB_COLORS.keys()}
-    for item in filtered_items:
-        status_key = _bucket_status(item.status)
-        if status_key == "cancelled" or status_key == "duplicate":
-            continue
-        effort = item.difficulty or 0.0
-        status_totals[status_key] += effort
+    burnup_svg = _burnup_chart_svg(
+        burnup_dates,
+        scope_series,
+        burnup_done_pts,
+        burnup_dup_pts,
+        f"BurnUp: {milestone_label or milestone_month}",
+        final_open=final_open_display,
+        final_done=final_done_display,
+        final_dup=final_dup_display,
+    )
 
-    progress_categories = ["Backlog", "Progress", "Review", "Done"]
-    progress_values = [
-        status_totals["backlog"],
-        status_totals["progress"],
-        status_totals["review"],
-        status_totals["done"],
+    cutoff = reference_date or date.today()
+
+    baseline_items = [
+        it
+        for it in active_items
+        if not (
+            _bucket_status(it.status) == "backlog"
+            and getattr(it, "content_state", None) == "CLOSED"
+        )
     ]
 
-    progress_colors_list = [
+    iter_items = [
+        it
+        for it in baseline_items
+        if getattr(it, "iteration_start", None) and getattr(it, "iteration_end", None)
+    ]
+    items_cut = [it for it in iter_items if it.iteration_end <= cutoff]
+
+    count_totals: Dict[str, int] = {
+        k: 0 for k in ["backlog", "blocked", "progress", "review", "done", "duplicate"]
+    }
+    difficulty_totals: Dict[str, float] = {
+        k: 0.0 for k in ["backlog", "blocked", "progress", "review", "done", "duplicate"]
+    }
+
+    for it in items_cut:
+        sk = _bucket_status(it.status)
+        if sk == "cancelled":
+            continue
+        is_dup_flag = _is_duplicate_item(it)
+
+        if (
+            is_dup_flag
+            and getattr(it, "status_updated_at", None)
+            and it.status_updated_at.date() <= cutoff
+            and _bucket_status(it.status) == "done"
+        ):
+            count_totals["done"] += 1
+            difficulty_totals["done"] += float(it.difficulty or 0.0)
+            continue
+
+        if is_dup_flag:
+            day = (it.status_updated_at or it.created_at).date()
+            if day <= cutoff:
+                count_totals["duplicate"] += 1
+                difficulty_totals["duplicate"] += float(it.difficulty or 0.0)
+            else:
+                count_totals["backlog"] += 1
+                difficulty_totals["backlog"] += float(it.difficulty or 0.0)
+            continue
+
+        if getattr(it, "status_updated_at", None) and it.status_updated_at.date() > cutoff:
+            count_totals["backlog"] += 1
+            difficulty_totals["backlog"] += float(it.difficulty or 0.0)
+        else:
+            key = sk if sk in ["backlog", "progress", "review", "done"] else "backlog"
+            count_totals[key] += 1
+            difficulty_totals[key] += float(it.difficulty or 0.0)
+
+    prog_cats = ["Backlog", "Progress", "Review", "Done"]
+    prog_vals_points = [
+        difficulty_totals["backlog"],
+        difficulty_totals["progress"],
+        difficulty_totals["review"],
+        difficulty_totals["done"],
+    ]
+    prog_cols = [
         GITHUB_COLORS["backlog"],
         GITHUB_COLORS["progress"],
         GITHUB_COLORS["review"],
         GITHUB_COLORS["done"],
     ]
 
-    progress_svg = _multi_color_bar_chart_svg(
-        progress_categories,
-        progress_values,
-        progress_colors_list,
-        "Progresso Atual vs Previsto",
-        y_label="Pontos",
-        x_label="Status",
+    progress_svg = _simple_bar_chart_svg(
+        prog_cats, prog_vals_points, prog_cols, "Progresso Atual (Previsto)", "Pontos"
     )
 
-    milestone_map: dict[str, dict[str, dict[str, float]]] = {}
-    for item in all_items:
-        raw_ms = item.milestone or "No Milestone"
-        milestone_label = " ".join(raw_ms.split()).strip()
+    categories = ["backlog", "blocked", "progress", "review", "done"]
+    total_count = sum(count_totals.get(c, 0) for c in categories)
+    weekly_table = {
+        "backlog": count_totals.get("backlog", 0),
+        "blocked": count_totals.get("blocked", 0),
+        "progress": count_totals.get("progress", 0),
+        "review": count_totals.get("review", 0),
+        "done": count_totals.get("done", 0),
+        "done_percent": int(round((count_totals.get("done", 0) / max(total_count, 1)) * 100)),
+        "done_review_percent": int(
+            round(
+                (
+                    (count_totals.get("done", 0) + count_totals.get("review", 0))
+                    / max(total_count, 1)
+                )
+                * 100
+            )
+        ),
+        "difficulty_points": {k: difficulty_totals.get(k, 0.0) for k in difficulty_totals.keys()},
+        "selected_count": len(items_cut),
+    }
 
-        milestone_map.setdefault(milestone_label, {"hours": {}, "difficulty": {}, "count": {}})
-        status_key = _bucket_status(item.status)
-        if status_key in ["cancelled", "duplicate"]:
-            continue
-        milestone_map[milestone_label]["hours"][status_key] = (
-            milestone_map[milestone_label]["hours"].get(status_key, 0.0) + item.estimate_hours
-        )
-        milestone_map[milestone_label]["difficulty"][status_key] = (
-            milestone_map[milestone_label]["difficulty"].get(status_key, 0.0) + item.difficulty
-        )
-        milestone_map[milestone_label]["count"][status_key] = (
-            milestone_map[milestone_label]["count"].get(status_key, 0.0) + 1
-        )
-
-    milestone_labels = list(milestone_map.keys())
-
-    def _milestone_stack(kind: str) -> dict[str, list[float]]:
-        return {
-            key: [milestone_map[label][kind].get(key, 0.0) for label in milestone_labels]
-            for key in GITHUB_COLORS.keys()
-        }
-
-    milestone_hours_svg = _stacked_bar_svg(
-        milestone_labels,
-        _milestone_stack("hours"),
-        GITHUB_COLORS,
-        "Milestones - Hours",
-        y_label="Milestone",
-        x_label="Horas",
-    )
-    milestone_difficulty_svg = _stacked_bar_svg(
-        milestone_labels,
-        _milestone_stack("difficulty"),
-        GITHUB_COLORS,
-        "Milestones - Dificuldade",
-        y_label="Milestone",
-        x_label="Pontos",
-    )
-    milestone_count_svg = _stacked_bar_svg(
-        milestone_labels,
-        _milestone_stack("count"),
-        GITHUB_COLORS,
-        "Milestones - Count",
-        y_label="Milestone",
-        x_label="Tasks",
-    )
+    label_map: Dict[str, Dict[str, int]] = {}
+    ref_date = reference_date or date.today()
 
     filtered_items = [
-        item for item in items if _bucket_status(item.status) not in ["cancelled", "duplicate"]
+        it
+        for it in active_items
+        if getattr(it, "iteration_start", None)
+        and it.created_at.date() <= ref_date
+        and _bucket_status(it.status) not in ["cancelled", "duplicate"]
     ]
-    total_count = len(filtered_items)
-    total_review = sum(1 for item in filtered_items if _bucket_status(item.status) == "review")
-    total_done = sum(1 for item in filtered_items if _bucket_status(item.status) == "done")
-    difficulty_total = sum(item.difficulty for item in filtered_items)
-    difficulty_review = sum(
-        item.difficulty for item in filtered_items if _bucket_status(item.status) == "review"
-    )
-    difficulty_done = sum(
-        item.difficulty for item in filtered_items if _bucket_status(item.status) == "done"
+
+    for item in filtered_items:
+        st = _bucket_status(item.status)
+        if st not in ["backlog", "progress", "review", "done"]:
+            st = "backlog"
+        for lbl in item.labels:
+            if lbl not in label_map:
+                label_map[lbl] = {"backlog": 0, "progress": 0, "review": 0, "done": 0}
+            label_map[lbl][st] = label_map[lbl].get(st, 0) + 1
+
+    sorted_labels = sorted(label_map.items(), key=lambda x: sum(x[1].values()), reverse=True)
+    exclude_norm = _normalize_text("Geração de Relatório")
+    filtered_sorted = [(k, v) for (k, v) in sorted_labels if _normalize_text(k) != exclude_norm]
+    top_labels = [k for k, v in filtered_sorted]
+    features_data = {lbl: label_map[lbl] for lbl in top_labels}
+    features_svg = _horizontal_stacked_bar_svg(
+        top_labels, features_data, f"Features - {milestone_label or milestone_month}"
     )
 
-    count_done = total_done
+    status_points_total = {k: 0.0 for k in GITHUB_COLORS}
+    status_counts_total = {k: 0 for k in GITHUB_COLORS}
+    for item in active_items:
+        st = _bucket_status(item.status)
+        if st == "cancelled":
+            continue
+        if st == "duplicate" or _is_duplicate_item(item):
+            status_points_total["duplicate"] += item.difficulty
+            status_counts_total["duplicate"] += 1
+            continue
+        status_points_total[st] += item.difficulty
+        status_counts_total[st] += 1
+
+    total_pts = sum(status_points_total.values())
+    total_cnt = sum(status_counts_total.values())
 
     total_table = {
-        "count_total": total_count,
-        "count_review": total_review,
-        "count_done": count_done,
-        "difficulty_total": difficulty_total,
-        "difficulty_review": difficulty_review,
-        "difficulty_done": difficulty_done,
-        "done_count_percent": _percent(total_done, total_count),
-        "done_difficulty_percent": _percent(difficulty_done, difficulty_total),
-        "done_review_count_percent": _percent(total_done + total_review, total_count),
-        "done_review_difficulty_percent": _percent(
-            difficulty_done + difficulty_review, difficulty_total
+        "count_total": total_cnt,
+        "count_review": status_counts_total.get("review", 0),
+        "count_done": status_counts_total.get("done", 0),
+        "difficulty_total": total_pts,
+        "difficulty_review": status_points_total.get("review", 0.0),
+        "difficulty_done": status_points_total.get("done", 0.0),
+        "done_count_percent": int((status_counts_total.get("done", 0) / max(total_cnt, 1)) * 100),
+        "done_difficulty_percent": int(
+            (status_points_total.get("done", 0.0) / max(total_pts, 1.0)) * 100
+        ),
+        "done_review_count_percent": int(
+            (
+                (status_counts_total.get("done", 0) + status_counts_total.get("review", 0))
+                / max(total_cnt, 1)
+            )
+            * 100
+        ),
+        "done_review_difficulty_percent": int(
+            (
+                (status_points_total.get("done", 0.0) + status_points_total.get("review", 0.0))
+                / max(total_pts, 1.0)
+            )
+            * 100
         ),
     }
 
-    week_stats = {"backlog": 0, "blocked": 0, "progress": 0, "review": 0, "done": 0}
-    weekly_items = []
-    week = _week_range(week_id)
-    if week:
-        start, end = week
-        for item in items:
-            include = False
-            if getattr(item, "iteration_end", None):
-                if item.iteration_end <= end:
-                    include = True
-            elif getattr(item, "iteration_start", None):
-                if item.iteration_start <= end:
-                    include = True
-            else:
-                created = item.created_at.date() if item.created_at else None
-                if created and created <= end:
-                    include = True
-
-            if include:
-                status_key = _bucket_status(item.status)
-                if status_key in ["cancelled", "duplicate"]:
-                    continue
-
-                status_key_at_week = status_key
-                if getattr(item, "status_updated_at", None):
-                    try:
-                        if item.status_updated_at.date() > end:
-                            status_key_at_week = "backlog"
-                    except Exception:
-                        status_key_at_week = status_key
-
-                weekly_items.append(item)
-                if status_key_at_week not in week_stats:
-                    status_key_at_week = "backlog"
-                week_stats[status_key_at_week] += 1
-
-    week_total = len(weekly_items)
-    week_done = week_stats["done"]
-    week_review = week_stats["review"]
-
-    weekly_table = {
-        "backlog": week_stats["backlog"],
-        "blocked": week_stats["blocked"],
-        "progress": week_stats["progress"],
-        "review": week_stats["review"],
-        "done": week_stats["done"],
-        "done_percent": _percent(week_done, week_total),
-        "done_review_percent": _percent(week_done + week_review, week_total),
-    }
-
-    weekly_progress_categories = ["Backlog", "In Progress", "In Review", "Done"]
-    weekly_progress_values = [
-        float(week_stats["backlog"]),
-        float(week_stats["progress"]),
-        float(week_stats["review"]),
-        float(week_stats["done"]),
-    ]
-    weekly_progress_colors = [
-        GITHUB_COLORS["backlog"],
-        GITHUB_COLORS["progress"],
-        GITHUB_COLORS["review"],
-        GITHUB_COLORS["done"],
-    ]
-    weekly_progress_svg = _multi_color_bar_chart_svg(
-        weekly_progress_categories,
-        weekly_progress_values,
-        weekly_progress_colors,
-        "Progresso da Semana",
-        y_label="Tarefas",
-        x_label="Status",
-    )
-
-    label_counts: dict[str, dict[str, float]] = {}
-    for item in filtered_items:
-        for label in item.labels:
-            if label not in label_counts:
-                label_counts[label] = {"backlog": 0.0, "progress": 0.0, "review": 0.0, "done": 0.0}
-            status_key = _bucket_status(item.status)
-            if status_key in ["cancelled", "duplicate"]:
-                continue
-            if status_key not in label_counts[label]:
-                status_key = "backlog"
-            label_counts[label][status_key] += 1
-
-    sorted_labels = sorted(
-        label_counts.items(), key=lambda x: sum(x[1].values()), reverse=True
-    )
-    top_labels = [label for label, _ in sorted_labels[:50]]
-
-    milestone_labels_stacks = {
-        "Backlog": [label_counts[label].get("backlog", 0.0) for label in top_labels],
-        "In progress": [label_counts[label].get("progress", 0.0) for label in top_labels],
-        "In review": [label_counts[label].get("review", 0.0) for label in top_labels],
-        "Done": [label_counts[label].get("done", 0.0) for label in top_labels],
-    }
-    milestone_labels_colors = {
-        "Backlog": GITHUB_COLORS["backlog"],
-        "In progress": GITHUB_COLORS["progress"],
-        "In review": GITHUB_COLORS["review"],
-        "Done": GITHUB_COLORS["done"],
-    }
-    milestone_labels_svg = _stacked_bar_svg(
-        top_labels,
-        milestone_labels_stacks,
-        milestone_labels_colors,
-        "Labels da Milestone",
-        y_label="Label",
-        x_label="Tarefas",
-    )
-
     return {
         "burnup_svg": burnup_svg,
-        "weekly_progress_svg": weekly_progress_svg,
-        "milestone_labels_svg": milestone_labels_svg,
-        "tables": {
-            "weekly": weekly_table,
-            "total": total_table,
-        },
-        "current_iteration": iteration_title,
+        "weekly_progress_svg": progress_svg,
+        "milestone_labels_svg": features_svg,
+        "tables": {"weekly": weekly_table, "total": total_table},
     }
