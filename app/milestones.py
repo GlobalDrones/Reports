@@ -19,6 +19,7 @@ class MilestoneEntry:
     closed_previous: int
     total_closed: int
     total_issues: int
+    due_date: date | None = None
 
     @property
     def percent(self) -> int:
@@ -355,13 +356,22 @@ def _load_from_urls(
                     token,
                 )
 
+            due_on = data.get("due_on")
+            due_dt = None
+            if due_on:
+                try:
+                    due_dt = datetime.fromisoformat(due_on.replace("Z", "+00:00")).date()
+                except Exception:
+                    due_dt = None
+
             entries.append(
                 MilestoneEntry(
                     name=name,
                     closed_week=closed_week,
                     closed_previous=closed_previous,
-                    total_closed=closed_issues,
+                    total_closed=total_issues and total_issues - (open_issues or 0) or total_issues,
                     total_issues=total_issues,
+                    due_date=due_dt,
                 )
             )
         except requests.RequestException:
@@ -453,6 +463,7 @@ def load_milestone_section(
             "closed_previous": entry.closed_previous,
             "total_closed": entry.total_closed,
             "total_issues": entry.total_issues,
+            "due_date": entry.due_date.isoformat() if entry.due_date else None,
         }
         for entry in entries
     ]
@@ -507,4 +518,5 @@ def load_milestone_section(
         "month": selected_month,
         "status_table": status_table,
         "difficulty_table": difficulty_table,
+        "due_date": (min([e.due_date for e in entries if e.due_date]) if any(e.due_date for e in entries) else None),
     }
