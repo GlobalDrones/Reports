@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -13,7 +13,7 @@ from weasyprint import CSS, HTML
 from app.config import get_assets_dir, get_settings, get_views_dir
 from app.integrations.github import get_issue_title
 from app.milestones import load_milestone_section
-from app.github_projects import load_project_charts, resolve_project_github_id
+from app.github_projects import load_project_charts
 
 logger = logging.getLogger(__name__)
 
@@ -234,18 +234,15 @@ def render_pdf(
                 if end_date is None or (week_start and end_date >= week_start):
                     _add_unique(summary_tasks_carryover, url, title)
 
+    summary_avg_completion = None
     if completed_durations:
         avg_completion = sum(completed_durations) / len(completed_durations)
         max_duration = max(completed_durations)
-        summary_charts.append(
-            {
-                "title": "Tempo médio para concluir",
-                "value": f"{avg_completion:.1f} dias",
-                "subtext": f"{len(completed_durations)} task(s) concluída(s)",
-                "pill": f"{int(round(avg_completion))}d",
-                "svg": _bar_svg(avg_completion, max(max_duration, 1)),
-            }
-        )
+        summary_avg_completion = {
+            "avg_days": avg_completion,
+            "max_days": max_duration,
+            "count": len(completed_durations),
+        }
 
     milestone_section = None
     milestone_requested = False
@@ -261,26 +258,34 @@ def render_pdf(
         if settings.project_milestone_urls and settings.project_milestone_urls.get(project_slug):
             milestone_requested = True
 
+        milestone_label = None
+        if milestone_section and milestone_section.get("month"):
+            milestone_label = milestone_section.get("month")
+
         project_id = None
         if settings.project_github_ids and project_slug in settings.project_github_ids:
             project_id = settings.project_github_ids.get(project_slug)
         else:
             project_id = settings.github_project_id
 
-        # Try to resolve project id automatically when not configured
-        if not project_id and settings.github_token:
-            try:
-                project_id = resolve_project_github_id(settings.github_token, project_slug)
-            except Exception:
-                logger.exception("auto-resolve project id failed")
+        if week_end:
+            ref_date = week_end + timedelta(days=6)
+        else:
+            ref_date = date.today()
 
+        resolved_month = milestone_month or (milestone_section.get("month") if milestone_section else None)
         project_charts = load_project_charts(
             token=settings.github_token,
             project_id=project_id,
-            week_id=week_id,
-            milestone_month=milestone_month,
-            reference_date=date.today(),
+            milestone_month=resolved_month,
+            reference_date=ref_date,
+            milestone_label=milestone_label,
         )
+        milestone_label = None
+        if milestone_section and milestone_section.get("month"):
+            milestone_label = milestone_section.get("month")
+
+    
 
     team_breakdown = []
     if reports_by_team:
@@ -467,6 +472,45 @@ def render_pdf(
     llm_summary = _try_llm_summary()
     if llm_summary:
         summary_paragraphs = llm_summary
+    else:
+        def _auto_summary() -> list[str]:
+            done_pct = None
+            done_review_pct = None
+            selected_count = None
+            difficulty_points = None
+            try:
+                weekly = weekly_table
+                done_pct = weekly.get('done_percent')
+                done_review_pct = weekly.get('done_review_percent')
+                selected_count = weekly.get('selected_count')
+                difficulty_points = weekly.get('difficulty_points')
+            except Exception:
+                weekly = {}
+
+            teams_text = ("; ".join(team_breakdown)) if team_breakdown else "sem detalhamento por time"
+
+            p1_parts = []
+            p1_parts.append(f"Período: {period_label or week_id}.")
+            p1_parts.append(f"Foram recebidos {total_reports} relatos com {total_tasks} tarefas, sendo {deliveries_count} entregas registradas.")
+            if done_pct is not None:
+                p1_parts.append(f"Progresso atual: ~{done_pct}% concluído ({done_review_pct}% incluindo revisões).")
+            if selected_count is not None:
+                p1_parts.append(f"Amostra considerada: {selected_count} itens na iteração selecionada.")
+
+            p1 = " ".join(p1_parts)
+
+            p2_parts = []
+            p2_parts.append(f"Foram reportadas {difficulties_count} ocorrências de dificuldade; os principais riscos devem ser tratados pelas equipes listadas: {teams_text}.")
+            p2_parts.append("Recomenda-se priorizar os itens em backlog e reduzir bloqueios, além de validar dependências que impactam entregas.")
+            p2 = " ".join(p2_parts)
+
+            def _shorten(text: str, max_sentences: int = 3) -> str:
+                sentences = [s.strip() for s in re.split(r"(?<=[.!?])\\s+", text) if s.strip()]
+                return " ".join(sentences[:max_sentences])
+
+            return [_shorten(p1, 3), _shorten(p2, 3)]
+
+        summary_paragraphs = _auto_summary()
 
     template = env.get_template("report_pdf.html")
     rendered_html = template.render(
@@ -476,8 +520,10 @@ def render_pdf(
         reports_by_project=reports_by_project,
         reports=reports,
         summary_charts=summary_charts,
+        summary_avg_completion=summary_avg_completion,
         milestone_section=milestone_section,
         project_charts=project_charts,
+        milestone_label=milestone_label,
         summary_paragraphs=summary_paragraphs,
         summary_tasks_worked=summary_tasks_worked,
         summary_tasks_completed=summary_tasks_completed,
