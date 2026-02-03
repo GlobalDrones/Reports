@@ -25,6 +25,11 @@
           Data de referência
           <input id="reference_date" type="date" required />
         </label>
+        <label>
+          Semana (ISO)
+          <input id="week_picker" type="week" aria-describedby="week-display" />
+        </label>
+        <p id="week-display" class="field-help">Semana selecionada: -</p>
         <input type="hidden" name="week_id" id="week_id" />
 
         <label>
@@ -75,6 +80,8 @@
       const milestoneSelect = document.getElementById("milestone_month");
       const milestoneHelp = document.getElementById("milestone-help");
       const weekInput = document.getElementById("week_id");
+      const weekPickerInput = document.getElementById("week_picker");
+      const weekDisplay = document.getElementById("week-display");
       const referenceDateInput = document.getElementById("reference_date");
       const status = document.getElementById("form-status");
       const downloadBtn = document.getElementById("download-btn");
@@ -108,6 +115,33 @@
         const [year, month, day] = referenceDateInput.value.split("-").map(Number);
         const selectedDate = new Date(year, (month || 1) - 1, day || 1);
         weekInput.value = getIsoWeekId(selectedDate);
+        if (weekPickerInput) {
+          weekPickerInput.value = weekInput.value;
+        }
+        if (weekDisplay) {
+          weekDisplay.textContent = `Semana selecionada: ${weekInput.value}`;
+        }
+      };
+
+      const setReferenceDateFromWeek = () => {
+        if (!referenceDateInput || !weekPickerInput || !weekPickerInput.value) {
+          return;
+        }
+        const [yearStr, weekStr] = weekPickerInput.value.split("-W");
+        const year = Number(yearStr);
+        const week = Number(weekStr);
+        if (!year || !week) {
+          return;
+        }
+        const friday = new Date(Date.UTC(year, 0, 4));
+        friday.setUTCDate(friday.getUTCDate() + (week - 1) * 7);
+        const dayNr = (friday.getUTCDay() + 6) % 7;
+        friday.setUTCDate(friday.getUTCDate() - dayNr + 4);
+        referenceDateInput.value = friday.toISOString().slice(0, 10);
+        weekInput.value = weekPickerInput.value;
+        if (weekDisplay) {
+          weekDisplay.textContent = `Semana selecionada: ${weekInput.value}`;
+        }
       };
 
       const populateProjects = () => {
@@ -190,6 +224,7 @@
       });
 
       referenceDateInput?.addEventListener("change", setWeekFromReferenceDate);
+      weekPickerInput?.addEventListener("change", setReferenceDateFromWeek);
       setReferenceDate();
       setWeekFromReferenceDate();
       populateProjects();
