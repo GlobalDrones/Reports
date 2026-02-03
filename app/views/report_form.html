@@ -271,6 +271,7 @@
     <script>
       const TEAMS = {{ teams | default('[]') | safe }};
       const SAFE_TEAMS = Array.isArray(TEAMS) ? TEAMS : [];
+      const reportLookupUrl = "{{ '/api/report' if not project_slug else '/' + project_slug + '/report' }}";
 
       const weekInput = document.getElementById("week_id");
       const referenceDateInput = document.getElementById("reference_date");
@@ -324,7 +325,11 @@
       setReferenceDateFromWeek();
       setReferenceDate();
       setWeekFromReferenceDate();
-      referenceDateInput?.addEventListener("change", setWeekFromReferenceDate);
+      const handleReferenceDateChange = () => {
+        setWeekFromReferenceDate();
+        loadExistingReport();
+      };
+      referenceDateInput?.addEventListener("change", handleReferenceDateChange);
 
       const devSelect = document.getElementById("developer_name");
       const teamSelect = document.getElementById("team_select");
@@ -395,6 +400,7 @@
         const selected = teamSelect.value;
         teamSlugInput.value = selected;
         populateMembers(selected);
+        loadExistingReport();
       });
 
       setupTeams();
@@ -414,7 +420,7 @@
         .forEach((input) => input.addEventListener("change", toggleDeliveriesField));
       toggleDeliveriesField();
 
-      const createDeliveryLinkItem = () => {
+      const createDeliveryLinkItem = (value = "") => {
         const row = document.createElement("div");
         row.className = "delivery-link-row";
         row.innerHTML = `
@@ -429,6 +435,10 @@
             </div>
           </div>
         `;
+        const input = row.querySelector(".delivery-link-input");
+        if (input) {
+          input.value = value || "";
+        }
         row.querySelector(".remove-delivery-link").addEventListener("click", () => {
           row.remove();
           syncDeliveryLinks();
@@ -485,7 +495,15 @@
       const tasksContainer = document.getElementById("tasks-container");
       const addTaskBtn = document.getElementById("add-task-btn");
 
-      const createTaskElement = () => {
+      const normalizeDateValue = (value) => {
+        if (!value) {
+          return "";
+        }
+        const stringValue = String(value);
+        return stringValue.length >= 10 ? stringValue.slice(0, 10) : stringValue;
+      };
+
+      const createTaskElement = (taskData = null) => {
         const taskId = taskCounter++;
         const taskDiv = document.createElement("div");
         taskDiv.className = "task-item";
@@ -517,6 +535,21 @@
           </label>
         `;
         tasksContainer.appendChild(taskDiv);
+
+        if (taskData) {
+          const urlInput = taskDiv.querySelector(".task-url");
+          const startInput = taskDiv.querySelector(".task-start-date");
+          const endInput = taskDiv.querySelector(".task-end-date");
+          if (urlInput) {
+            urlInput.value = taskData.task_url || "";
+          }
+          if (startInput) {
+            startInput.value = normalizeDateValue(taskData.start_date);
+          }
+          if (endInput) {
+            endInput.value = normalizeDateValue(taskData.end_date);
+          }
+        }
 
         const removeBtn = taskDiv.querySelector(".remove-task-btn");
         removeBtn.addEventListener("click", () => {
@@ -579,6 +612,106 @@
           closeOverwriteModal(false);
         }
       });
+
+      let reportLookupToken = 0;
+      const setRadioValue = (name, value) => {
+        document.querySelectorAll(`input[name='${name}']`).forEach((input) => {
+          input.checked = String(input.value) === String(value);
+        });
+      };
+      const setTextValue = (selector, value) => {
+        const element = document.querySelector(selector);
+        if (element) {
+          element.value = value || "";
+        }
+      };
+      const refreshCounters = () => {
+        counters.forEach((textarea) => {
+          textarea.dispatchEvent(new Event("input"));
+        });
+      };
+      const applyReportData = (report) => {
+        if (!report) {
+          return;
+        }
+        setTextValue("textarea[name='summary']", report.summary);
+        setTextValue("textarea[name='progress']", report.progress);
+        setTextValue("textarea[name='difficulties_description']", report.difficulties_description);
+        setTextValue("textarea[name='next_steps']", report.next_steps);
+        setTextValue("textarea[name='deliveries_notes']", report.deliveries_notes);
+
+        setRadioValue("had_difficulties", report.had_difficulties ? "true" : "false");
+        setRadioValue("had_deliveries", report.had_deliveries ? "true" : "false");
+        setRadioValue("self_assessment", report.self_assessment);
+        setRadioValue("next_week_expectation", report.next_week_expectation);
+        toggleDifficultiesField();
+        toggleDeliveriesField();
+
+        tasksContainer.innerHTML = "";
+        taskCounter = 0;
+        const tasks = Array.isArray(report.tasks) ? report.tasks : [];
+        if (tasks.length === 0) {
+          createTaskElement();
+        } else {
+          tasks.forEach((task) => createTaskElement(task));
+          updateTaskNumbers();
+        }
+
+        deliveriesLinksContainer.innerHTML = "";
+        const links = Array.isArray(report.deliveries_links)
+          ? report.deliveries_links
+          : report.deliveries_link
+          ? [report.deliveries_link]
+          : [];
+        if (links.length === 0) {
+          createDeliveryLinkItem();
+        } else {
+          links.forEach((link) => createDeliveryLinkItem(link));
+        }
+        syncDeliveryLinks();
+        refreshCounters();
+      };
+
+      const loadExistingReport = async () => {
+        const weekId = weekInput?.value?.trim();
+        const developer = devSelect?.value?.trim();
+        const teamSlug = teamSlugInput?.value?.trim() || "";
+        if (!weekId || !developer) {
+          return;
+        }
+        if (teamSelect && teamSelect.required && !teamSlug) {
+          return;
+        }
+        const currentToken = ++reportLookupToken;
+        const params = new URLSearchParams({
+          week: weekId,
+          developer,
+        });
+        if (teamSlug) {
+          params.set("team", teamSlug);
+        }
+        try {
+          const response = await fetch(`${reportLookupUrl}?${params.toString()}`);
+          if (currentToken !== reportLookupToken) {
+            return;
+          }
+          if (response.status === 404) {
+            return;
+          }
+          if (!response.ok) {
+            return;
+          }
+          const report = await response.json();
+          if (currentToken !== reportLookupToken) {
+            return;
+          }
+          applyReportData(report);
+        } catch (error) {
+          console.warn("Falha ao carregar report existente", error);
+        }
+      };
+
+      devSelect?.addEventListener("change", loadExistingReport);
 
       const submitForm = async (allowOverwrite = false) => {
         status.style.display = "none";
