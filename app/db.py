@@ -263,6 +263,30 @@ def get_existing_report_id(
         return int(row["id"]) if row else None
 
 
+def get_report(
+    settings: Settings,
+    week_id: str,
+    project_slug: str,
+    team_slug: str,
+    developer_name: str,
+) -> dict[str, Any] | None:
+    with get_connection(settings) as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM reports
+            WHERE week_id = ? AND project_slug = ? AND team_slug = ? AND developer_name = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (week_id, project_slug, team_slug, developer_name),
+        ).fetchone()
+        if not row:
+            return None
+        hydrated = _hydrate_reports(conn, [row])
+        return hydrated[0] if hydrated else None
+
+
 def list_reports(
     settings: Settings,
     week_id: str,
