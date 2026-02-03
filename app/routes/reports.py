@@ -216,3 +216,76 @@ def list_reports_default(request: Request, week: str, team: str | None = None):
         team_slug = next(iter(project.resolved_teams().keys()))
     reports = db.list_reports(settings, week, project_slug, team_slug)
     return reports
+
+
+@router.get("/{project_slug}/report", response_model=ReportOut)
+def get_report(
+    request: Request,
+    project_slug: str,
+    week: str,
+    developer: str,
+    team: str | None = None,
+):
+    settings = request.app.state.settings
+    try:
+        project_slug, project = settings.get_project(project_slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    team_slug: str | None = None
+    if team is not None and team != "":
+        try:
+            team_slug, team_obj = settings.get_team(project_slug, team)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        if len(project.resolved_teams()) == 1:
+            team_slug = next(iter(project.resolved_teams().keys()))
+            _, team_obj = settings.get_team(project_slug, team_slug)
+        else:
+            raise HTTPException(status_code=400, detail="Team not provided for project with multiple teams")
+
+    if developer not in team_obj.members:
+        raise HTTPException(
+            status_code=400,
+            detail="Developer does not belong to the selected team.",
+        )
+
+    report = db.get_report(settings, week, project_slug, team_slug, developer)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
+@router.get("/api/report", response_model=ReportOut)
+def get_report_default(
+    request: Request,
+    week: str,
+    developer: str,
+    team: str | None = None,
+):
+    settings = request.app.state.settings
+    project_slug, project = settings.get_project(None)
+    team_slug: str | None = None
+    if team is not None and team != "":
+        try:
+            team_slug, team_obj = settings.get_team(project_slug, team)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        if len(project.resolved_teams()) == 1:
+            team_slug = next(iter(project.resolved_teams().keys()))
+            _, team_obj = settings.get_team(project_slug, team_slug)
+        else:
+            raise HTTPException(status_code=400, detail="Team not provided for project with multiple teams")
+
+    if developer not in team_obj.members:
+        raise HTTPException(
+            status_code=400,
+            detail="Developer does not belong to the selected team.",
+        )
+
+    report = db.get_report(settings, week, project_slug, team_slug, developer)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
