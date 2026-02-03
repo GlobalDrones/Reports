@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import unicodedata
-from typing import Iterable
 
 import requests
 
@@ -78,29 +77,58 @@ def _find_project_id_for_owner(token: str, owner: str, slug: str) -> str | None:
     return None
 
 
-def resolve_project_github_id(token: str, slug: str) -> str | None:
-    for owner in _get_owner_logins(token):
-        pid = _find_project_id_for_owner(token, owner, slug)
-        if pid:
-            return pid
-    return None
+def _resolve_project_id_by_org_number(token: str, org: str, number: int) -> str | None:
+        query = """
+        query($login: String!, $num: Int!) {
+            organization(login: $login) {
+                projectV2(number: $num) { id title }
+            }
+        }
+        """
+        data = _graphql(token, query, {"login": org, "num": number})
+        org_node = data.get("organization") or {}
+        project = org_node.get("projectV2") or {}
+        return project.get("id")
 
 
-def _iter_slugs(argv: list[str]) -> list[str]:
+def _resolve_project_id_by_repo_number(token: str, owner: str, repo: str, number: int) -> str | None:
+        query = """
+        query($owner: String!, $repo: String!, $num: Int!) {
+            repository(owner: $owner, name: $repo) {
+                projectV2(number: $num) { id title }
+            }
+        }
+        """
+        data = _graphql(token, query, {"owner": owner, "repo": repo, "num": number})
+        repo_node = data.get("repository") or {}
+        project = repo_node.get("projectV2") or {}
+        return project.get("id")
+
+
+def _parse_target(value: str) -> tuple[str, dict[str, object]]:
+        parts = [part for part in value.split("/") if part]
+        if len(parts) >= 3 and parts[0].lower() in {"org", "organization"}:
+                return "org", {"org": parts[1], "number": parts[2]}
+        if len(parts) >= 4 and parts[0].lower() in {"repo", "repository"}:
+                return "repo", {"owner": parts[1], "repo": parts[2], "number": parts[3]}
+        return "slug", {"slug": value}
+
+
+def _iter_targets(argv: list[str]) -> list[str]:
     if not argv:
-        return ["agrosmart"]
-    slugs: list[str] = []
+        return []
+    targets: list[str] = []
     for item in argv:
         if "," in item:
-            slugs.extend([part.strip() for part in item.split(",") if part.strip()])
+            targets.extend([part.strip() for part in item.split(",") if part.strip()])
         else:
-            slugs.append(item)
-    return slugs or ["agrosmart"]
+            targets.append(item)
+    return targets
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
-    slugs = _iter_slugs(argv)
+    targets = _iter_targets(argv)
 
     try:
         get_settings.cache_clear()
@@ -108,17 +136,28 @@ def main(argv: list[str] | None = None) -> int:
         pass
     settings = get_settings()
 
+    if not targets:
+        print("Usage: python scripts/find_project_id.py org/<ORG>/<NUMBER>[,org/<ORG>/<NUMBER>...] repo/<OWNER>/<REPO>/<NUMBER>")
+        return 1
+
     exit_code = 0
-    for slug in slugs:
-        print(f"Looking up project id for slug: {slug}")
+    for target in targets:
+        target_type, payload = _parse_target(target)
 
-        if settings.project_github_ids and slug in settings.project_github_ids:
-            pid = settings.project_github_ids.get(slug)
-            print(f"Found in PROJECT_GITHUB_IDS: {pid}")
-            continue
-
-        if settings.github_project_id:
-            print(f"Found GITHUB_PROJECT_ID (default): {settings.github_project_id}")
+        if target_type == "org":
+            org = str(payload.get("org"))
+            number_raw = payload.get("number")
+            print(f"Looking up project id for org/number: {org}/{number_raw}")
+        elif target_type == "repo":
+            owner = str(payload.get("owner"))
+            repo = str(payload.get("repo"))
+            number_raw = payload.get("number")
+            print(f"Looking up project id for repo/number: {owner}/{repo}/{number_raw}")
+        else:
+            print(
+                "Unsupported target. Use org/<ORG>/<NUMBER> or repo/<OWNER>/<REPO>/<NUMBER>."
+            )
+            exit_code = max(exit_code, 5)
             continue
 
         if not settings.github_token:
@@ -130,7 +169,17 @@ def main(argv: list[str] | None = None) -> int:
             "Attempting to resolve via GitHub GraphQL (may require 'project' and 'read:org' scopes)..."
         )
         try:
-            pid = resolve_project_github_id(settings.github_token, slug)
+            pid = None
+            if target_type == "org":
+                pid = _resolve_project_id_by_org_number(
+                    settings.github_token, org, int(str(number_raw))
+                )
+            elif target_type == "repo":
+                pid = _resolve_project_id_by_repo_number(
+                    settings.github_token, owner, repo, int(str(number_raw))
+                )
+            else:
+                pid = None
             if pid:
                 print(f"Resolved ProjectV2 id: {pid}")
                 continue
