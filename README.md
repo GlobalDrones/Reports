@@ -124,7 +124,7 @@ curl -X POST "http://localhost:3456/rsd/generate?week=2026-W05&project_slug=agro
 ### 4. Publicar Relatório Gerado (Enviar PDF)
 Envia o PDF gerado para o canal de comunicação configurado:
 ```bash
-curl -X POST "http://localhost:3456/teams/notify/publish?week=2026-W05&project_slug=agrosmart&team=backend"
+curl -X POST "http://localhost:3456/teams/notify/publish?week=2026-W05&project_slug=agrosmart"
 ```
 
 ### 5. Admin Database
@@ -171,22 +171,23 @@ docker build -t reports .
 docker run -p 3456:3456 -v $(pwd)/data:/app/data --env-file .env reports
 ```
 
-## 🔎 Local helper: encontrar ProjectV2 ID
 
-When you need the GitHub ProjectV2 id for a project (used by the milestone charts), there's a small helper script:
+## 🔎 Local helper: encontrar ProjectV2 ID
+Quando você precisar do identificador ProjectV2 do GitHub (usado pelos gráficos de milestones), há um script auxiliar:
 
 ```bash
-python scripts/find_project_id.py [project_slug]
-# Example (defaults to 'agrosmart')
-python scripts/find_project_id.py agrosmart
+# ProjectV2 da organização por número (formato: org/<ORG>/<NUMBER>)
+python scripts/find_project_id.py org/GlobalDrones/3
+
+# ProjectV2 de repositório por número (formato: repo/<OWNER>/<REPO>/<NUMBER>)
+python scripts/find_project_id.py repo/GlobalDrones/AgroSmart-API/2
+
+# Múltiplos alvos (separados por vírgula ou por espaço)
+python scripts/find_project_id.py org/GlobalDrones/3,repo/GlobalDrones/AgroSmart-API/2
+python scripts/find_project_id.py org/GlobalDrones/3 repo/GlobalDrones/AgroSmart-API/2
 ```
 
-Behavior:
-- First checks `PROJECT_GITHUB_IDS` and `GITHUB_PROJECT_ID` from your `.env`.
-- If not found, attempts to resolve the ProjectV2 id via GitHub GraphQL using `GITHUB_TOKEN`.
-
-Requirements:
-- `GITHUB_TOKEN` must be set in `.env` (or environment) when using the resolver.
-- Token scopes: `project` is required; `read:org` may be required to search organization projects.
-
-If the resolver fails due to insufficient scopes or credentials, the script prints a helpful message explaining the missing permissions.
+Comportamento:
+- Se você passar `org/<ORG>/<NUMBER>` ou `repo/<OWNER>/<REPO>/<NUMBER>`, o script resolve diretamente via GitHub GraphQL usando o número que aparece na URL do projeto.
+- A busca por slug foi removida; agora é obrigatório fornecer org/repo + número.
+- Para consultas em organizações, o `GITHUB_TOKEN` precisa dos escopos `project` e `read:org`.
