@@ -263,10 +263,11 @@ def render_pdf(
             milestone_label = milestone_section.get("month")
 
         project_id = None
-        if settings.project_github_ids and project_slug in settings.project_github_ids:
-            project_id = settings.project_github_ids.get(project_slug)
-        else:
-            project_id = settings.github_project_id
+        try:
+            _, project_config = settings.get_project(project_slug)
+            project_id = project_config.github_project_id
+        except ValueError:
+            pass
 
         if week_end:
             ref_date = week_end + timedelta(days=6)
