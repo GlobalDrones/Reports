@@ -73,24 +73,47 @@ Acesse: http://localhost:3456/form
 # Projeto simples (sem equipes)
 PROJECTS={"transpetro":{"name":"Transpetro","members":["Ana","Bruno"]}}
 
-# Projeto com equipes
-PROJECTS={"agrosmart":{"name":"Agrosmart","teams":{"backend":{"name":"Backend","members":["Lucas","Gabriel"]},"frontend":{"name":"Frontend","members":["Paula","Rafael"]}}}}
+# Projeto com equipes e GitHub Project ID
+PROJECTS={"agrosmart":{"name":"Agrosmart","github_project_id":"xxxxxxxxx","teams":{"backend":{"name":"Backend","members":["Lucas","Gabriel"]},"frontend":{"name":"Frontend","members":["Paula","Rafael"]}}}}
 ```
 
 ### Webhooks e agendamento
 
+**IMPORTANTE:** `days` usa o padrão ISO 8601 onde **0=Segunda-feira** e **6=Domingo**.
+
 ```bash
-PROJECT_TEAMS_CONFIG={"agrosmart":{"channels":[{"name":"backend","enabled":true,"webhook_url":"https://outlook.office.com/webhook/xxx","team_slug":"backend","schedules":[{"days":[1,4],"times":["18:00"]}]}]}}
+# Canal específico por time
+PROJECT_TEAMS_CONFIG={"agrosmart":{"channels":[{"name":"backend","enabled":true,"webhook_url":"https://outlook.office.com/webhook/xxx","team_slug":"backend","schedules":[{"days":[4],"times":["18:00"]}]}]}}
+
+# Canal geral (sem separação por time) - basta omitir o team_slug
+PROJECT_TEAMS_CONFIG={"agrosmart":{"channels":[{"name":"agile-geral","enabled":true,"webhook_url":"https://outlook.office.com/webhook/xxx","schedules":[{"days":[4],"times":["17:00"]}],"collect":{"schedules":[{"days":[0,2,4],"times":["09:00"]}]}}]}}
 ```
 
-Dias da semana: 0=Segunda, 1=Terça, ..., 6=Domingo.
+#### Como obter o Webhook URL do Teams
+
+1. No Microsoft Teams, vá até o canal onde deseja receber as notificações
+2. Clique nos três pontos (...) ao lado do nome do canal
+3. Selecione "Connectors" ou "Conectores"
+4. Procure por "Incoming Webhook"
+5. Clique em "Configurar" ou "Configure"
+6. Dê um nome ao webhook e clique em "Criar"
+7. Copie a URL gerada e use em `webhook_url`
+
+Se o webhook parar de funcionar, você pode enviar notificações manualmente usando os endpoints `/teams/notify/collect` e `/teams/notify/publish`.
 
 ### Integrações opcionais
 
 ```bash
+# GitHub Token para integração com Projects e Milestones
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
+
+# Configurar github_project_id dentro de cada projeto
+PROJECTS={"agrosmart":{"name":"Agrosmart","github_project_id":"xxxxxxxxxx","teams":{...}}}
+
+# Milestones do GitHub (opcional)
 PROJECT_MILESTONE_URLS={"agrosmart":["https://github.com/Org/Repo/milestone/1"]}
 
+# LLM para resumo executivo (opcional)
 LLM_API_URL=https://llm.globaldrones.com.br
 LLM_MODEL=gemini-2.5-flash
 LLM_API_KEY=sk-xxxxxxxxxxxxx
@@ -148,7 +171,7 @@ python scripts/clean_db.py --yes
 
 ### 3) Gráficos e Resumos Gerenciais
 - **Resumo geral da semana (cards no topo):** média de autoavaliação, expectativa para a próxima semana, % de entregas e % de dificuldades.
-- **Gráficos de projeto (GitHub Projects):** só aparecem se `GITHUB_TOKEN` e `GITHUB_PROJECT_ID` (ou `PROJECT_GITHUB_IDS`) estiverem configurados.
+	- **Gráficos de projeto (GitHub Projects):** só aparecem se `GITHUB_TOKEN` estiver configurado E o projeto tiver `github_project_id` definido.
 - **Gráfico BurnUp:** mostra evolução acumulada de escopo, concluído e duplicados (baseado em “pontos de dificuldade”).
 - **Progresso Atual vs Previsto:** distribui pontos por status (Backlog, Progress, Review, Done).
 - **Milestones (Hours/Difficulty/Count):** barras empilhadas comparando milestones e seus status.
