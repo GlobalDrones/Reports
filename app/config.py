@@ -15,6 +15,7 @@ class ProjectConfig(BaseModel):
     name: str
     members: list[str] | None = None
     teams: dict[str, TeamConfig] | None = None
+    github_project_id: str | None = None
 
     def resolved_teams(self) -> dict[str, TeamConfig]:
         if self.teams:
@@ -30,8 +31,6 @@ class Settings(BaseSettings):
     data_dir: str
     deliveries_link_url: str | None = None
     github_token: str | None = None
-    github_project_id: str | None = None
-    project_github_ids: dict[str, str] | None = None
     llm_api_url: str | None = None
     llm_model: str | None = None
     llm_api_key: str | None = None
@@ -47,15 +46,6 @@ class Settings(BaseSettings):
     @field_validator("project_milestone_urls", mode="before")
     @classmethod
     def _normalize_project_milestone_urls(cls, value):
-        if value is None or value == "":
-            return None
-        if isinstance(value, dict):
-            return value
-        return value
-
-    @field_validator("project_github_ids", mode="before")
-    @classmethod
-    def _normalize_project_github_ids(cls, value):
         if value is None or value == "":
             return None
         if isinstance(value, dict):
