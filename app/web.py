@@ -33,7 +33,7 @@ def render_form(
         {
             "slug": slug,
             "name": team.name,
-            "members": team.members,
+            "members": team.member_names(),
         }
         for slug, team in teams.items()
     ]
