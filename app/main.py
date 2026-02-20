@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_assets_dir, get_public_dir, get_settings
 from app.db import init_db
-from app.routes import health, reports, rsd, teams
+from app.routes import health, notifications, reports, rsd
 from app.scheduler import start_scheduler
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(reports.router)
     app.include_router(rsd.router)
-    app.include_router(teams.router)
+    app.include_router(notifications.router)
 
     rsd.register_project_form_routes(app, settings)
 
