@@ -60,7 +60,7 @@ async def create_report(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    if developer_name not in team.members:
+    if developer_name not in team.member_names():
         raise HTTPException(
             status_code=400,
             detail="Developer does not belong to the selected team.",
@@ -245,7 +245,7 @@ def get_report(
         else:
             raise HTTPException(status_code=400, detail="Team not provided for project with multiple teams")
 
-    if developer not in team_obj.members:
+    if developer not in team_obj.member_names():
         raise HTTPException(
             status_code=400,
             detail="Developer does not belong to the selected team.",
@@ -279,7 +279,7 @@ def get_report_default(
         else:
             raise HTTPException(status_code=400, detail="Team not provided for project with multiple teams")
 
-    if developer not in team_obj.members:
+    if developer not in team_obj.member_names():
         raise HTTPException(
             status_code=400,
             detail="Developer does not belong to the selected team.",
