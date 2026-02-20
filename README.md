@@ -6,7 +6,7 @@ Sistema automatizado para geração, envio e arquivamento de relatórios semanai
 
 - Formulários web por projeto/equipe (rotas dinâmicas)
 - Consolidação e geração de PDF por semana
-- Notificações via Microsoft Teams/Slack
+- Notificações por email (SMTP)
 - Agendamento automático de avisos
 - Integração com milestones do GitHub (opcional)
 - Resumo executivo com LLM (opcional)
@@ -31,13 +31,16 @@ source .venv/bin/activate
 ```bash
 cp .env.example .env
 nano .env
+cp config.json.example config.json
+nano config.json
 ```
 
 Variáveis mínimas:
 
 - `BASE_URL`
-- `PROJECTS`
-- `PROJECT_TEAMS_CONFIG`
+- `SMTP_HOST`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
 
 ### 3) Banco de dados
 
@@ -61,45 +64,87 @@ Acesse: http://localhost:3456/form
 | `/{project}/form` | GET | Formulário do projeto |
 | `/{project}/reports` | POST | Criar relatório |
 | `/rsd/generate` | POST | Gerar PDF |
-| `/teams/notify/collect` | POST | Notificar coleta |
-| `/teams/notify/publish` | POST | Notificar publicação |
+| `/notifications/collect` | POST | Notificar coleta por email |
+| `/notifications/publish` | POST | Notificar publicação por email |
 | `/health` | GET | Health check |
 
 ## 🧩 Configuração
 
 ### Projetos e equipes
 
+Esses dados ficam em `config.json`.
+
 ```bash
 # Projeto simples (sem equipes)
-PROJECTS={"transpetro":{"name":"Transpetro","members":["Ana","Bruno"]}}
+{
+	"projects": {
+		"transpetro": {
+			"name": "Transpetro",
+			"members": [
+				{"name": "Ana", "email": "ana@empresa.com"},
+				{"name": "Bruno", "email": "bruno@empresa.com"}
+			]
+		}
+	}
+}
 
 # Projeto com equipes e GitHub Project ID
-PROJECTS={"agrosmart":{"name":"Agrosmart","github_project_id":"xxxxxxxxx","teams":{"backend":{"name":"Backend","members":["Lucas","Gabriel"]},"frontend":{"name":"Frontend","members":["Paula","Rafael"]}}}}
+{
+	"projects": {
+		"agrosmart": {
+			"name": "Agrosmart",
+			"github_project_id": "xxxxxxxxx",
+			"teams": {
+				"backend": {
+					"name": "Backend",
+					"members": [
+						{"name": "Lucas", "email": "lucas@empresa.com"},
+						{"name": "Gabriel", "email": "gabriel@empresa.com"}
+					]
+				}
+			}
+		}
+	}
+}
 ```
 
-### Webhooks e agendamento
+### Email e agendamento
+
+Esses dados ficam em `config.json` no campo `project_notifications_config`.
 
 **IMPORTANTE:** `days` usa o padrão ISO 8601 onde **0=Segunda-feira** e **6=Domingo**.
 
 ```bash
-# Canal específico por time
-PROJECT_TEAMS_CONFIG={"agrosmart":{"channels":[{"name":"backend","enabled":true,"webhook_url":"https://outlook.office.com/webhook/xxx","team_slug":"backend","schedules":[{"days":[4],"times":["18:00"]}]}]}}
+# Notificações por email por time (usa emails dos members do time)
+{"project_notifications_config":{"agrosmart":{"channels":[{"name":"backend","enabled":true,"team_slug":"backend","publish":{"title":"Relatório semanal pronto","text":"Segue em anexo o PDF do relatório da semana.","schedules":[{"days":[4],"times":["18:00"]}]}}]}}}
 
-# Canal geral (sem separação por time) - basta omitir o team_slug
-PROJECT_TEAMS_CONFIG={"agrosmart":{"channels":[{"name":"agile-geral","enabled":true,"webhook_url":"https://outlook.office.com/webhook/xxx","schedules":[{"days":[4],"times":["17:00"]}],"collect":{"schedules":[{"days":[0,2,4],"times":["09:00"]}]}}]}}
+# Notificações por email para canal geral (sem team_slug) usando todos os emails do projeto
+{"project_notifications_config":{"agrosmart":{"channels":[{"name":"agile-geral","enabled":true,"publish":{"schedules":[{"days":[4],"times":["17:00"]}]},"collect":{"schedules":[{"days":[0,2,4],"times":["09:00"]}]}}]}}}
 ```
 
-#### Como obter o Webhook URL do Teams
+#### Configuração SMTP mínima
 
-1. No Microsoft Teams, vá até o canal onde deseja receber as notificações
-2. Clique nos três pontos (...) ao lado do nome do canal
-3. Selecione "Connectors" ou "Conectores"
-4. Procure por "Incoming Webhook"
-5. Clique em "Configurar" ou "Configure"
-6. Dê um nome ao webhook e clique em "Criar"
-7. Copie a URL gerada e use em `webhook_url`
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=seu.email@gmail.com
+SMTP_PASSWORD=sua_senha_de_app
+SMTP_FROM=seu.email@gmail.com
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+```
 
-Se o webhook parar de funcionar, você pode enviar notificações manualmente usando os endpoints `/teams/notify/collect` e `/teams/notify/publish`.
+#### Gmail: como gerar senha de app
+
+1. Acesse `https://myaccount.google.com/security`
+2. Ative **Verificação em duas etapas**
+3. Vá em **Senhas de app**
+4. Escolha app `Mail` e dispositivo `Outro (nome personalizado)`
+5. Gere a senha e use no `SMTP_PASSWORD`
+
+Se a opção **Senhas de app** não aparecer, a conta pode estar bloqueada por política (Workspace). Nesse caso, use outra conta ou peça liberação ao administrador.
+
+Você pode enviar notificações manualmente usando os endpoints `/notifications/collect` e `/notifications/publish`.
 
 ### Integrações opcionais
 
@@ -108,7 +153,7 @@ Se o webhook parar de funcionar, você pode enviar notificações manualmente us
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 
 # Configurar github_project_id dentro de cada projeto
-PROJECTS={"agrosmart":{"name":"Agrosmart","github_project_id":"xxxxxxxxxx","teams":{...}}}
+{"projects":{"agrosmart":{"name":"Agrosmart","github_project_id":"xxxxxxxxxx","teams":{"backend":{"name":"Backend","members":[{"name":"Lucas","email":"lucas@empresa.com"}]}}}}}
 
 # Milestones do GitHub (opcional)
 PROJECT_MILESTONE_URLS={"agrosmart":["https://github.com/Org/Repo/milestone/1"]}
@@ -128,10 +173,10 @@ curl http://localhost:3456/health
 ```
 
 ### 2. Disparar Coleta de Relatórios (Solicitação aos Desenvolvedores)
-Envia notificações para o canal do Teams/Slack solicitando preenchimento:
+Envia notificações por email solicitando preenchimento:
 ```bash
-# Formato: /teams/notify/collect?week={WEEK_ISO}&project_slug={PROJECT}&team={TEAM}
-curl -X POST "http://localhost:3456/teams/notify/collect?week=2026-W05&project_slug=agrosmart&team=backend"
+# Formato: /notifications/collect?week={WEEK_ISO}&project_slug={PROJECT}&team={TEAM}
+curl -X POST "http://localhost:3456/notifications/collect?week=2026-W05&project_slug=agrosmart&team=backend"
 ```
 
 ### 3. Gerar PDF Manualmente
@@ -145,9 +190,9 @@ curl -X POST "http://localhost:3456/rsd/generate?week=2026-W05&project_slug=agro
 ```
 
 ### 4. Publicar Relatório Gerado (Enviar PDF)
-Envia o PDF gerado para o canal de comunicação configurado:
+Envia o PDF gerado por email para os destinatários configurados:
 ```bash
-curl -X POST "http://localhost:3456/teams/notify/publish?week=2026-W05&project_slug=agrosmart"
+curl -X POST "http://localhost:3456/notifications/publish?week=2026-W05&project_slug=agrosmart"
 ```
 
 ### 5. Admin Database
@@ -183,9 +228,9 @@ Usa `PROJECT_MILESTONE_URLS` para coletar metas específicas por repositório.
 - **Vários milestones:** cada milestone aparece com seu próprio status.
 
 ### 5) Mensagens e Publicação
-- **Coleta (`/teams/notify/collect`):** envia mensagem com link do formulário conforme `PROJECT_TEAMS_CONFIG`.
-- **Publicação (`/teams/notify/publish`):** envia link para o PDF gerado, com caminho calculado por `project_slug` e `team`.
-- **Webhook:** se não houver canal configurado, é necessário informar `webhook_url` na chamada.
+- **Coleta (`/notifications/collect`):** envia email com link do formulário conforme `PROJECT_NOTIFICATIONS_CONFIG`.
+- **Publicação (`/notifications/publish`):** envia email com link para o PDF gerado, com caminho calculado por `project_slug` e `team`.
+- **Destinatários:** se não houver canal configurado, informe `recipients` na chamada.
 
 ## 🐳 Docker (opcional)
 
