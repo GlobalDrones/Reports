@@ -1,21 +1,56 @@
 from functools import lru_cache
+import json
 from pathlib import Path
-import os
 
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class MemberConfig(BaseModel):
+    name: str
+    email: str | None = None
+
+
 class TeamConfig(BaseModel):
     name: str
-    members: list[str]
+    members: list[MemberConfig] = []
+
+    @field_validator("members", mode="before")
+    @classmethod
+    def _normalize_members(cls, value):
+        if value is None:
+            return []
+        normalized: list[dict[str, str | None]] = []
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    normalized.append({"name": item, "email": None})
+                elif isinstance(item, dict):
+                    name = str(item.get("name", "")).strip()
+                    if not name:
+                        continue
+                    email_raw = item.get("email")
+                    email = str(email_raw).strip() if email_raw else None
+                    normalized.append({"name": name, "email": email})
+        return normalized
+
+    def member_names(self) -> list[str]:
+        return [member.name for member in self.members]
+
+    def member_emails(self) -> list[str]:
+        return [member.email for member in self.members if member.email]
 
 
 class ProjectConfig(BaseModel):
     name: str
-    members: list[str] | None = None
+    members: list[MemberConfig] | None = None
     teams: dict[str, TeamConfig] | None = None
     github_project_id: str | None = None
+
+    @field_validator("members", mode="before")
+    @classmethod
+    def _normalize_members(cls, value):
+        return TeamConfig._normalize_members(value)
 
     def resolved_teams(self) -> dict[str, TeamConfig]:
         if self.teams:
@@ -24,24 +59,40 @@ class ProjectConfig(BaseModel):
             return {"default": TeamConfig(name=self.name, members=self.members)}
         return {"default": TeamConfig(name=self.name, members=[])}
 
+    def project_emails(self) -> list[str]:
+        emails: set[str] = set()
+        for team in self.resolved_teams().values():
+            for email in team.member_emails():
+                if email:
+                    emails.add(email)
+        return sorted(emails)
 
-class Settings(BaseSettings):
+
+class EnvSettings(BaseSettings):
     app_name: str
     base_url: str
     data_dir: str
-    deliveries_link_url: str | None = None
+    cors_origins: str = "*"
     github_token: str | None = None
     llm_api_url: str | None = None
     llm_model: str | None = None
     llm_api_key: str | None = None
-    project_milestone_urls: dict[str, object] | None = None
-    project_teams_config: str | None = None
-    projects: dict[str, ProjectConfig] | None = None
-    project_name: str | None = None
-    project_members: list[str] | None = None
-    cors_origins: str = "*"
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
 
-    model_config = SettingsConfigDict(env_file=None, env_prefix="")
+    model_config = SettingsConfigDict(env_file=None, env_prefix="", extra="ignore")
+
+
+class ConfigFile(BaseModel):
+    deliveries_link_url: str | None = None
+    project_notifications_config: dict[str, object] | None = None
+    project_milestone_urls: dict[str, object] | None = None
+    projects: dict[str, ProjectConfig]
 
     @field_validator("project_milestone_urls", mode="before")
     @classmethod
@@ -52,14 +103,30 @@ class Settings(BaseSettings):
             return value
         return value
 
+
+class Settings(BaseModel):
+    app_name: str
+    base_url: str
+    data_dir: str
+    cors_origins: str = "*"
+    github_token: str | None = None
+    llm_api_url: str | None = None
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    deliveries_link_url: str | None = None
+    project_notifications_config: dict[str, object] | None = None
+    project_milestone_urls: dict[str, object] | None = None
+    projects: dict[str, ProjectConfig]
+
     def list_projects(self) -> dict[str, ProjectConfig]:
-        if self.projects:
-            return self.projects
-        if self.project_name:
-            return {
-                "default": ProjectConfig(name=self.project_name, members=self.project_members or [])
-            }
-        return {}
+        return self.projects
 
     def get_project(self, project_slug: str | None = None) -> tuple[str, ProjectConfig]:
         projects = self.list_projects()
@@ -85,59 +152,34 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid team: {team_slug}")
         return team_slug, team
 
-
-def _is_json_multiline_start(value: str) -> bool:
-    stripped = value.strip()
-    return stripped.startswith("{") or stripped.startswith("[")
+    def get_notifications_config(self) -> dict[str, object] | None:
+        return self.project_notifications_config
 
 
-def _balance_brackets(text: str) -> int:
-    return text.count("{") + text.count("[") - text.count("}") - text.count("]")
-
-
-def _load_env_multiline_json(path: Path) -> None:
+def _load_config_file(path: Path) -> dict:
     if not path.exists():
-        return
-
-    lines = path.read_text(encoding="utf-8").splitlines()
-    i = 0
-    while i < len(lines):
-        raw = lines[i]
-        i += 1
-
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        if "=" not in raw:
-            continue
-
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key:
-            continue
-
-        if key in os.environ:
-            continue
-
-        if _is_json_multiline_start(value):
-            buffer = value
-            balance = _balance_brackets(buffer)
-            while balance > 0 and i < len(lines):
-                buffer = f"{buffer}\n{lines[i]}"
-                i += 1
-                balance = _balance_brackets(buffer)
-            os.environ[key] = buffer
-            continue
-
-        cleaned = value.strip()
-        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ('"', "'"):
-            cleaned = cleaned[1:-1]
-        os.environ[key] = cleaned
+        raise FileNotFoundError(
+            "config.json not found. Create it from config.json.example and configure projects/notifications."
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise ValueError("config.json is not a valid JSON file")
+    return data if isinstance(data, dict) else {}
 
 
 @lru_cache
 def get_settings() -> Settings:
-    _load_env_multiline_json(get_project_root() / ".env")
-    return Settings()
+    env_settings = EnvSettings(
+        _env_file=get_project_root() / ".env",
+        _env_file_encoding="utf-8",
+    )
+    config = ConfigFile.model_validate(_load_config_file(get_project_root() / "config.json"))
+    merged = {
+        **env_settings.model_dump(),
+        **config.model_dump(),
+    }
+    return Settings.model_validate(merged)
 
 
 def get_project_root() -> Path:
