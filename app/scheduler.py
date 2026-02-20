@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app import db
-from app.integrations.teams import send_teams_message
+from app.integrations.email import send_email_message
 from app.report_pdf import render_pdf
 
 
@@ -40,9 +40,11 @@ def _build_weekly_filename(week_id: str, project_slug: str, team_slug: str | Non
     return base, f"{base}.pdf"
 
 
-def _parse_project_teams_config(raw: str | None) -> dict[str, Any]:
+def _parse_project_notifications_config(raw: dict[str, Any] | str | None) -> dict[str, Any]:
     if not raw:
         return {}
+    if isinstance(raw, dict):
+        return raw
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
@@ -65,12 +67,47 @@ def _normalize_schedules(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _normalize_recipients(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _resolve_recipients(settings, project_slug: str, team_slug: str | None, channel: dict[str, Any]) -> list[str]:
+    explicit = _normalize_recipients(
+        channel.get("recipients")
+        or channel.get("emails")
+        or channel.get("email")
+        or channel.get("to")
+    )
+    if explicit:
+        return explicit
+
+    try:
+        _, project = settings.get_project(project_slug)
+    except ValueError:
+        return []
+
+    if team_slug:
+        try:
+            _, team = settings.get_team(project_slug, team_slug)
+        except ValueError:
+            return []
+        return team.member_emails()
+
+    return project.project_emails()
+
+
 def _build_report(
     settings,
     project_slug: str,
     team_slug: str | None,
     week_id: str,
-) -> tuple[str, Path] | None:
+) -> tuple[str, str, Path] | None:
     try:
         _, project = settings.get_project(project_slug)
     except ValueError:
@@ -109,11 +146,17 @@ def _build_report(
         file_title=file_title,
         milestone_month=None,
     )
-    return output_name, output_path
+    return file_title, output_name, output_path
 
 
 def _send_project_message(
-    settings, project_slug: str, webhook_url: str, team_slug: str | None, week_id: str
+    settings,
+    project_slug: str,
+    recipients: list[str],
+    team_slug: str | None,
+    week_id: str,
+    title: str | None,
+    text: str | None,
 ) -> None:
     base_url = (settings.base_url or "").rstrip("/")
     if not base_url:
@@ -123,15 +166,19 @@ def _send_project_message(
     if not output:
         return
 
-    output_name, _ = output
+    file_title, output_name, output_path = output
     if team_slug:
         link_url = f"{base_url}/rsd/{project_slug}/{team_slug}/{week_id}.pdf"
     else:
         link_url = f"{base_url}/rsd/{project_slug}/{week_id}.pdf"
 
-    title = f"Relatório publicado - {project_slug}"
-    text = f"O PDF do relatório da semana {week_id} para a equipe {team_slug or project_slug} já está disponível. Clique no botão abaixo para abrir o PDF."
-    send_teams_message(webhook_url, title, text, link_url, button_name="Abrir PDF")
+    message_title = title or f"Relatório publicado - {file_title}"
+    message_text = text or (
+        f"O PDF do relatório da semana {week_id} para a equipe {team_slug or project_slug} "
+        "já está disponível."
+    )
+    body = f"{message_text}\n\nLink: {link_url}"
+    send_email_message(settings, recipients, message_title, body, attachments=[output_path])
 
 
 def _build_collect_message(
@@ -172,7 +219,7 @@ def _build_collect_message(
 def _send_collect_message(
     settings,
     project_slug: str,
-    webhook_url: str,
+    recipients: list[str],
     team_slug: str | None,
     week_id: str,
     title: str | None,
@@ -182,23 +229,18 @@ def _send_collect_message(
     if not payload:
         return
     message_title, message_text, form_link = payload
-    send_teams_message(
-        webhook_url,
-        message_title,
-        message_text,
-        form_link,
-        button_name="Abrir formulário",
-    )
+    body = f"{message_text}\n\nLink: {form_link}"
+    send_email_message(settings, recipients, message_title, body)
 
 
 def start_scheduler(app) -> None:
     settings = app.state.settings
-    project_config = _parse_project_teams_config(settings.project_teams_config)
+    project_config = _parse_project_notifications_config(settings.get_notifications_config())
     if not project_config:
         return
 
     state = {"sent": set()}
-    app.state.teams_scheduler = state
+    app.state.email_scheduler = state
 
     def _loop() -> None:
         while True:
@@ -214,16 +256,28 @@ def start_scheduler(app) -> None:
                 for channel in _iter_channels(config):
                     if not channel.get("enabled", False):
                         continue
-                    webhook_url = channel.get("webhook_url")
-                    if not webhook_url:
+                    recipients = _resolve_recipients(settings, project_slug, channel.get("team_slug"), channel)
+                    if not recipients:
                         continue
 
                     team_slug = channel.get("team_slug")
                     channel_name = channel.get("name", "channel")
 
-                    publish_schedules = _normalize_schedules(
-                        channel.get("publish_pdf") or channel.get("schedules")
-                    )
+                    publish_config = channel.get("publish")
+                    if isinstance(publish_config, dict):
+                        publish_title = publish_config.get("title")
+                        publish_text = publish_config.get("text")
+                        publish_schedules = _normalize_schedules(
+                            publish_config.get("schedules")
+                            or channel.get("publish_pdf")
+                            or channel.get("schedules")
+                        )
+                    else:
+                        publish_title = channel.get("publish_title")
+                        publish_text = channel.get("publish_text")
+                        publish_schedules = _normalize_schedules(
+                            channel.get("publish_pdf") or channel.get("schedules")
+                        )
                     for schedule in publish_schedules:
                         days = schedule.get("days", [])
                         times = schedule.get("times", [])
@@ -237,7 +291,15 @@ def start_scheduler(app) -> None:
                         if key in state["sent"]:
                             continue
 
-                        _send_project_message(settings, project_slug, webhook_url, team_slug, week_id)
+                        _send_project_message(
+                            settings,
+                            project_slug,
+                            recipients,
+                            team_slug,
+                            week_id,
+                            publish_title,
+                            publish_text,
+                        )
                         state["sent"].add(key)
 
                     form_request_config = channel.get("form_request") or channel.get("collect")
@@ -268,7 +330,7 @@ def start_scheduler(app) -> None:
                         _send_collect_message(
                             settings,
                             project_slug,
-                            webhook_url,
+                            recipients,
                             team_slug,
                             week_id,
                             collect_title,
