@@ -254,7 +254,7 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
                 if _normalize_text(f_name) == _normalize_text(FIELD_STATUS):
                     status = fv.get("name") or ""
 
-                elif _normalize_text(f_name) == _normalize_text(FIELD_DIFFICULTY):
+                elif _normalize_text(f_name) in [_normalize_text(FIELD_DIFFICULTY), _normalize_text("Estimated Effort")]:
                     val = fv.get("number")
                     if val is None:
                         val = fv.get("name")
