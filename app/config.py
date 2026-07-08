@@ -84,6 +84,10 @@ class EnvSettings(BaseSettings):
     smtp_from: str | None = None
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
+    azure_tenant_id: str | None = None
+    azure_client_id: str | None = None
+    azure_client_secret: str | None = None
+    azure_sender_email: str | None = None
 
     model_config = SettingsConfigDict(env_file=None, env_prefix="", extra="ignore")
 
@@ -121,6 +125,10 @@ class Settings(BaseModel):
     smtp_from: str | None = None
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
+    azure_tenant_id: str | None = None
+    azure_client_id: str | None = None
+    azure_client_secret: str | None = None
+    azure_sender_email: str | None = None
     deliveries_link_url: str | None = None
     project_notifications_config: dict[str, object] | None = None
     project_milestone_urls: dict[str, object] | None = None

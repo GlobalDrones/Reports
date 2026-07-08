@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import base64
+import logging
 import smtplib
 import time
 from pathlib import Path
 from email.message import EmailMessage
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+GRAPH_TOKEN_URL = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+GRAPH_SEND_MAIL_URL = "https://graph.microsoft.com/v1.0/users/{sender}/sendMail"
 
 
 def _normalize_recipients(value: str | list[str] | None) -> list[str]:
@@ -12,6 +21,68 @@ def _normalize_recipients(value: str | list[str] | None) -> list[str]:
     if isinstance(value, str):
         return [item.strip() for item in value.split(",") if item.strip()]
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _get_graph_access_token(settings, timeout: int) -> str:
+    resp = requests.post(
+        GRAPH_TOKEN_URL.format(tenant_id=settings.azure_tenant_id),
+        data={
+            "grant_type": "client_credentials",
+            "client_id": settings.azure_client_id,
+            "client_secret": settings.azure_client_secret,
+            "scope": "https://graph.microsoft.com/.default",
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+
+def _send_via_graph(
+    settings,
+    to_list: list[str],
+    subject: str,
+    text: str,
+    html: str | None,
+    attachments: list[str | Path] | None,
+    timeout: int,
+) -> None:
+    access_token = _get_graph_access_token(settings, timeout)
+
+    graph_attachments = []
+    for attachment in attachments or []:
+        path = Path(attachment)
+        if not path.exists() or not path.is_file():
+            continue
+        graph_attachments.append(
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": path.name,
+                "contentType": "application/pdf",
+                "contentBytes": base64.b64encode(path.read_bytes()).decode("ascii"),
+            }
+        )
+
+    body = {
+        "message": {
+            "subject": subject,
+            "body": {
+                "contentType": "HTML" if html else "Text",
+                "content": html or text,
+            },
+            "toRecipients": [{"emailAddress": {"address": addr}} for addr in to_list],
+            "attachments": graph_attachments,
+        },
+        "saveToSentItems": "false",
+    }
+
+    resp = requests.post(
+        GRAPH_SEND_MAIL_URL.format(sender=settings.azure_sender_email),
+        json=body,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
 
 
 def send_email_message(
@@ -29,6 +100,26 @@ def send_email_message(
     to_list = _normalize_recipients(recipients)
     if not to_list:
         raise ValueError("No email recipients configured")
+
+    use_graph = bool(
+        settings.azure_tenant_id
+        and settings.azure_client_id
+        and settings.azure_client_secret
+        and settings.azure_sender_email
+    )
+    if use_graph:
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _send_via_graph(settings, to_list, subject, text, html, attachments, timeout)
+                return
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(f"email.graph.send_failed attempt={attempt} error={exc}")
+                if attempt >= max_attempts:
+                    break
+                time.sleep(base_delay * (2 ** (attempt - 1)))
+        raise RuntimeError("Email delivery via Microsoft Graph failed") from last_exc
 
     smtp_host = settings.smtp_host
     smtp_port = settings.smtp_port
