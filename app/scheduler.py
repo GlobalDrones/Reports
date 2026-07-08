@@ -291,10 +291,13 @@ def start_scheduler(app) -> None:
                         if key in state["sent"]:
                             continue
 
+                        all_publish_recipients = list(
+                            dict.fromkeys(recipients + settings.global_publish_recipients)
+                        )
                         _send_project_message(
                             settings,
                             project_slug,
-                            recipients,
+                            all_publish_recipients,
                             team_slug,
                             week_id,
                             publish_title,

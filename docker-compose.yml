@@ -7,3 +7,5 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+    environment:
+      - TZ=America/Sao_Paulo

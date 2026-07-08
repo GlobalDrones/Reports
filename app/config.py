@@ -92,6 +92,7 @@ class ConfigFile(BaseModel):
     deliveries_link_url: str | None = None
     project_notifications_config: dict[str, object] | None = None
     project_milestone_urls: dict[str, object] | None = None
+    global_publish_recipients: list[str] = []
     projects: dict[str, ProjectConfig]
 
     @field_validator("project_milestone_urls", mode="before")
@@ -123,6 +124,7 @@ class Settings(BaseModel):
     deliveries_link_url: str | None = None
     project_notifications_config: dict[str, object] | None = None
     project_milestone_urls: dict[str, object] | None = None
+    global_publish_recipients: list[str] = []
     projects: dict[str, ProjectConfig]
 
     def list_projects(self) -> dict[str, ProjectConfig]:
