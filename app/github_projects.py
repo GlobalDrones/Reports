@@ -618,10 +618,18 @@ def load_project_charts(
 
     milestone_dues = [it.milestone_due for it in active_items if getattr(it, "milestone_due", None)]
     if milestone_dues:
-        end_date = min(milestone_dues)
-        logger.info(
-            f"[burnup] end_date={end_date} via milestone due date (menor dueOn entre {len(milestone_dues)} item(s))"
-        )
+        milestone_end = min(milestone_dues)
+        if milestone_end < reference_date:
+            end_date = reference_date + timedelta(days=7)
+            logger.info(
+                f"[burnup] end_date={end_date} via extensão (milestone due date {milestone_end} já passou; "
+                f"estendendo até a semana atual + 1 semana)"
+            )
+        else:
+            end_date = milestone_end
+            logger.info(
+                f"[burnup] end_date={end_date} via milestone due date (menor dueOn entre {len(milestone_dues)} item(s))"
+            )
     else:
         end_date = reference_date
         logger.info(f"[burnup] end_date={end_date} via fallback reference_date (nenhum item com milestone_due)")

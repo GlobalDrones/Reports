@@ -91,19 +91,8 @@ def download_reports(
                 for team_slug, team in teams.items()
             }
             project_reports = db.list_reports(settings, week_id, slug, None)
-            if project_reports:
-                reports.extend(project_reports)
-                reports_by_project[project.name] = project_reports_by_team
-
-        if not reports:
-            return render_reports_download(
-                request,
-                status_message=(
-                    "Nenhum relatório encontrado para a semana selecionada. "
-                    "Preencha os formulários e tente novamente."
-                ),
-                status_type="warning",
-            )
+            reports.extend(project_reports)
+            reports_by_project[project.name] = project_reports_by_team
 
         period_label, _ = _iso_week_label(week_id)
         file_title, output_name = _build_weekly_filename(week_id, "todos-projetos", None)
@@ -143,16 +132,6 @@ def download_reports(
             for slug, team in teams.items()
         }
         reports = db.list_reports(settings, week_id, project_slug, None)
-
-    if not reports:
-        return render_reports_download(
-            request,
-            status_message=(
-                "Nenhum relatório encontrado para a semana selecionada. "
-                "Preencha os formulários e tente novamente."
-            ),
-            status_type="warning",
-        )
 
     period_label, _ = _iso_week_label(week_id)
     file_title, output_name = _build_weekly_filename(week_id, project_slug, team_slug)

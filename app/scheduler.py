@@ -132,9 +132,6 @@ def _build_report(
         reports = db.list_reports(settings, week_id, project_slug, None)
         file_title, output_name = _build_weekly_filename(week_id, project_slug, None)
 
-    if not reports:
-        return None
-
     output_path = Path(settings.data_dir) / "rsd" / output_name
     render_pdf(
         week_id,
