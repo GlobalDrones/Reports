@@ -235,24 +235,30 @@
                 <table class="milestone-table">
                     <thead>
                         <tr>
-                            <th>Backlog</th>
-                            <th>Blocked</th>
-                            <th>Progress</th>
-                            <th>Review</th>
-                            <th>Done</th>
-                            <th>% Done</th>
-                            <th>% Done+Review</th>
+                            <th>Count Total</th>
+                            <th>Count in Review</th>
+                            <th>Count Done</th>
+                            <th>Dificuldade Total</th>
+                            <th>Dificuldade in Review</th>
+                            <th>Dificuldade Done</th>
+                            <th>% Done Count</th>
+                            <th>% Done Dificuldade</th>
+                            <th>% Done+Review Count</th>
+                            <th>% Done+Review Dificuldade</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
-                            <td>{{ project_charts.tables.weekly.backlog }}</td>
-                            <td>{{ project_charts.tables.weekly.blocked }}</td>
-                            <td>{{ project_charts.tables.weekly.progress }}</td>
-                            <td>{{ project_charts.tables.weekly.review }}</td>
-                            <td>{{ project_charts.tables.weekly.done }}</td>
-                            <td>{{ project_charts.tables.weekly.done_percent }}%</td>
-                            <td>{{ project_charts.tables.weekly.done_review_percent }}%</td>
+                            <td>{{ project_charts.tables.weekly_totals.count_total }}</td>
+                            <td>{{ project_charts.tables.weekly_totals.count_review }}</td>
+                            <td>{{ project_charts.tables.weekly_totals.count_done }}</td>
+                            <td>{{ project_charts.tables.weekly_totals.difficulty_total }}</td>
+                            <td>{{ project_charts.tables.weekly_totals.difficulty_review }}</td>
+                            <td>{{ project_charts.tables.weekly_totals.difficulty_done }}</td>
+                            <td>{{ project_charts.tables.weekly_totals.done_count_percent }}%</td>
+                            <td>{{ project_charts.tables.weekly_totals.done_difficulty_percent }}%</td>
+                            <td>{{ project_charts.tables.weekly_totals.done_review_count_percent }}%</td>
+                            <td>{{ project_charts.tables.weekly_totals.done_review_difficulty_percent }}%</td>
                         </tr>
                     </tbody>
                 </table>

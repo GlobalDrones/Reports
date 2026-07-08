@@ -325,6 +325,7 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
 
 
 IDEAL_LINE_COLOR = "#3b82f6"
+DONE_REVIEW_LINE_COLOR = "#f59e0b"
 
 
 def _compute_ideal_step_series(
@@ -365,6 +366,7 @@ def _burnup_chart_svg(
     final_done: int | None = None,
     final_dup: int | None = None,
     ideal_series: List[float] | None = None,
+    done_review_series: List[float] | None = None,
 ) -> str:
     if not dates:
         return ""
@@ -419,6 +421,13 @@ def _burnup_chart_svg(
         for x, y in ideal_pts[1:]:
             ideal_step_path += f" H {x:.1f} V {y:.1f}"
 
+    done_review_line = ""
+    if done_review_series:
+        done_review_points = [
+            f"{get_x(i):.1f},{get_y(v):.1f}" for i, v in enumerate(done_review_series)
+        ]
+        done_review_line = "M " + " ".join(done_review_points)
+
     x_labels_svg = ""
     step = max(1, len(dates) // 8)
     for i in range(0, len(dates), step):
@@ -438,20 +447,30 @@ def _burnup_chart_svg(
         + f'<text x="{last_x + 8:.1f}" y="{last_done_y + 4:.1f}" font-size="11" fill="{GITHUB_COLORS["done"]}" font-weight="600">{display_done}</text>'
         + f'<text x="{last_x + 8:.1f}" y="{get_y(last_dup_val) + 14:.1f}" font-size="11" fill="#9ca3af" font-weight="600">{int(final_dup) if final_dup is not None else int(last_dup_val)}</text>'
     )
+    if done_review_series:
+        last_done_review_val = done_review_series[-1]
+        last_values_svg += (
+            f'<text x="{last_x + 8:.1f}" y="{get_y(last_done_review_val) - 6:.1f}" '
+            f'font-size="11" fill="{DONE_REVIEW_LINE_COLOR}" font-weight="600">'
+            f"{int(last_done_review_val)}</text>"
+        )
 
     legend_items = [
         ("Open Scope", GITHUB_COLORS["open_scope"]),
         ("Completed", GITHUB_COLORS["done"]),
         ("Duplicate", GITHUB_COLORS["duplicate"]),
     ]
+    if done_review_line:
+        legend_items.append(("Done+Review", DONE_REVIEW_LINE_COLOR))
     if ideal_step_path:
         legend_items.append(("Ideal", IDEAL_LINE_COLOR))
 
-    legend_base = width - 360 - (90 if ideal_step_path else 0)
+    item_width = 90 if len(legend_items) <= 3 else 105
+    legend_base = width - 360 - max(0, len(legend_items) - 3) * item_width
     legend_svg = ""
     for idx, (label, color) in enumerate(legend_items):
-        cx = legend_base + idx * 90
-        tx = legend_base + 10 + idx * 90
+        cx = legend_base + idx * item_width
+        tx = legend_base + 10 + idx * item_width
         legend_svg += f'<circle cx="{cx:.0f}" cy="30" r="4" fill="{color}"/>'
         legend_svg += f'<text x="{tx:.0f}" y="34" font-size="12" fill="{TEXT_COLOR}">{label}</text>'
 
@@ -471,6 +490,7 @@ def _burnup_chart_svg(
         <path d="{scope_line}" fill="none" stroke="{GITHUB_COLORS["open_scope"]}" stroke-width="2"/>
         <path d="{done_line}" fill="none" stroke="{GITHUB_COLORS["done"]}" stroke-width="2"/>
         <path d="{dup_line}" fill="none" stroke="#9ca3af" stroke-width="2" stroke-dasharray="4 4" opacity="0.9"/>
+        {f'<path d="{done_review_line}" fill="none" stroke="{DONE_REVIEW_LINE_COLOR}" stroke-width="2"/>' if done_review_line else ""}
         {f'<path d="{ideal_step_path}" fill="none" stroke="{IDEAL_LINE_COLOR}" stroke-width="2" stroke-dasharray="6 4" opacity="0.9"/>' if ideal_step_path else ""}
 
         {x_labels_svg}
@@ -652,11 +672,17 @@ def load_project_charts(
 
         is_dup_item = _is_duplicate_item(item)
 
-        is_done_column = _bucket_status(item.status) == "done"
+        item_bucket = _bucket_status(item.status)
+        is_done_column = item_bucket == "done"
         if is_done_column and item.status_updated_at and not is_dup_item:
             done_day = item.status_updated_at.date()
             if done_day <= end_date:
                 events_pts.append((done_day, "done", item.difficulty))
+
+        if item_bucket in ("done", "review") and item.status_updated_at and not is_dup_item:
+            done_review_day = item.status_updated_at.date()
+            if done_review_day <= end_date:
+                events_pts.append((done_review_day, "done_review", item.difficulty))
 
         if is_dup_item:
             dup_day = (item.status_updated_at or item.created_at).date()
@@ -669,8 +695,9 @@ def load_project_charts(
     burnup_scope_pts: List[float] = []
     burnup_done_pts: List[float] = []
     burnup_dup_pts: List[float] = []
+    burnup_done_review_pts: List[float] = []
 
-    scope_acc = done_acc = dup_acc = 0.0
+    scope_acc = done_acc = dup_acc = done_review_acc = 0.0
     curr_date = start_date
     idx = 0
     while curr_date <= end_date:
@@ -682,12 +709,15 @@ def load_project_charts(
                 done_acc += val
             elif tipo == "dup":
                 dup_acc += val
+            elif tipo == "done_review":
+                done_review_acc += val
             idx += 1
 
         burnup_dates.append(curr_date)
         burnup_scope_pts.append(scope_acc)
         burnup_done_pts.append(done_acc)
         burnup_dup_pts.append(dup_acc)
+        burnup_done_review_pts.append(done_review_acc)
         curr_date += timedelta(days=1)
 
     def _is_strictly_done(it: ProjectItem) -> bool:
@@ -700,11 +730,17 @@ def load_project_charts(
     total_done_pts = sum(
         it.difficulty for it in active_items if _is_strictly_done(it) and not _is_duplicate_item(it)
     )
+    total_done_review_pts = sum(
+        it.difficulty
+        for it in active_items
+        if _bucket_status(it.status) in ("done", "review") and not _is_duplicate_item(it)
+    )
 
     if burnup_scope_pts:
         burnup_scope_pts[-1] = total_scope_pts
         burnup_done_pts[-1] = total_done_pts
         burnup_dup_pts[-1] = total_dup_pts
+        burnup_done_review_pts[-1] = total_done_review_pts
 
     scope_series = burnup_scope_pts
 
@@ -724,6 +760,7 @@ def load_project_charts(
         final_done=final_done_display,
         final_dup=final_dup_display,
         ideal_series=ideal_series,
+        done_review_series=burnup_done_review_pts,
     )
 
     cutoff = reference_date or date.today()
@@ -825,6 +862,43 @@ def load_project_charts(
         "selected_count": len(items_cut),
     }
 
+    week_categories = ["backlog", "blocked", "progress", "review", "done", "duplicate"]
+    week_count_total = sum(count_totals.get(c, 0) for c in week_categories)
+    week_difficulty_total = sum(difficulty_totals.get(c, 0.0) for c in week_categories)
+
+    weekly_totals_table = {
+        "count_total": week_count_total,
+        "count_review": count_totals.get("review", 0),
+        "count_done": count_totals.get("done", 0),
+        "difficulty_total": week_difficulty_total,
+        "difficulty_review": difficulty_totals.get("review", 0.0),
+        "difficulty_done": difficulty_totals.get("done", 0.0),
+        "done_count_percent": int(
+            round((count_totals.get("done", 0) / max(week_count_total, 1)) * 100)
+        ),
+        "done_difficulty_percent": int(
+            round((difficulty_totals.get("done", 0.0) / max(week_difficulty_total, 1.0)) * 100)
+        ),
+        "done_review_count_percent": int(
+            round(
+                (
+                    (count_totals.get("done", 0) + count_totals.get("review", 0))
+                    / max(week_count_total, 1)
+                )
+                * 100
+            )
+        ),
+        "done_review_difficulty_percent": int(
+            round(
+                (
+                    (difficulty_totals.get("done", 0.0) + difficulty_totals.get("review", 0.0))
+                    / max(week_difficulty_total, 1.0)
+                )
+                * 100
+            )
+        ),
+    }
+
     label_map: Dict[str, Dict[str, int]] = {}
     ref_date = reference_date or date.today()
 
@@ -901,5 +975,5 @@ def load_project_charts(
         "burnup_svg": burnup_svg,
         "weekly_progress_svg": progress_svg,
         "milestone_labels_svg": features_svg,
-        "tables": {"weekly": weekly_table, "total": total_table},
+        "tables": {"weekly": weekly_table, "weekly_totals": weekly_totals_table, "total": total_table},
     }
