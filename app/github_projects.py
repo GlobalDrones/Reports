@@ -30,6 +30,7 @@ TEXT_COLOR = "#0d1117"
 GRID_COLOR = "#30363d"
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @dataclass
@@ -66,7 +67,7 @@ def _parse_date(value: str | None) -> date | None:
     if not value:
         return None
     try:
-        return date.fromisoformat(value)
+        return date.fromisoformat(value[:10])
     except ValueError:
         return None
 
@@ -323,6 +324,33 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
     return items
 
 
+IDEAL_LINE_COLOR = "#3b82f6"
+
+
+def _compute_ideal_step_series(
+    items: List[ProjectItem],
+    dates: List[date],
+    start_date: date,
+    end_date: date,
+) -> List[float]:
+    if not dates:
+        return []
+
+    bucket_totals: Dict[date, float] = {}
+    for item in items:
+        if not item.iteration_start or not item.iteration_end:
+            continue
+        bucket_day = min(max(item.iteration_start, start_date), end_date)
+        bucket_totals[bucket_day] = bucket_totals.get(bucket_day, 0.0) + item.difficulty
+
+    series: List[float] = []
+    acc = 0.0
+    for d in dates:
+        acc += bucket_totals.get(d, 0.0)
+        series.append(acc)
+    return series
+
+
 def _svg_header(title: str) -> str:
     return f"""<text x="{CHART_PADDING}" y="25" font-size="16" fill="{TEXT_COLOR}" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">{title}</text>"""
 
@@ -336,6 +364,7 @@ def _burnup_chart_svg(
     final_open: int | None = None,
     final_done: int | None = None,
     final_dup: int | None = None,
+    ideal_series: List[float] | None = None,
 ) -> str:
     if not dates:
         return ""
@@ -383,6 +412,13 @@ def _burnup_chart_svg(
     done_line = f"M " + " ".join([f"{p}" for p in completed_points])
     dup_line = dup_line
 
+    ideal_step_path = ""
+    if ideal_series:
+        ideal_pts = [(get_x(i), get_y(v)) for i, v in enumerate(ideal_series)]
+        ideal_step_path = f"M {ideal_pts[0][0]:.1f},{ideal_pts[0][1]:.1f}"
+        for x, y in ideal_pts[1:]:
+            ideal_step_path += f" H {x:.1f} V {y:.1f}"
+
     x_labels_svg = ""
     step = max(1, len(dates) // 8)
     for i in range(0, len(dates), step):
@@ -403,12 +439,19 @@ def _burnup_chart_svg(
         + f'<text x="{last_x + 8:.1f}" y="{get_y(last_dup_val) + 14:.1f}" font-size="11" fill="#9ca3af" font-weight="600">{int(final_dup) if final_dup is not None else int(last_dup_val)}</text>'
     )
 
-    legend_items = [("open_scope", "Open Scope"), ("done", "Completed"), ("duplicate", "Duplicate")]
+    legend_items = [
+        ("Open Scope", GITHUB_COLORS["open_scope"]),
+        ("Completed", GITHUB_COLORS["done"]),
+        ("Duplicate", GITHUB_COLORS["duplicate"]),
+    ]
+    if ideal_step_path:
+        legend_items.append(("Ideal", IDEAL_LINE_COLOR))
+
+    legend_base = width - 360 - (90 if ideal_step_path else 0)
     legend_svg = ""
-    for idx, (key, label) in enumerate(legend_items):
-        cx = width - 360 + idx * 90
-        tx = width - 350 + idx * 90
-        color = GITHUB_COLORS.get(key, "#9ca3af")
+    for idx, (label, color) in enumerate(legend_items):
+        cx = legend_base + idx * 90
+        tx = legend_base + 10 + idx * 90
         legend_svg += f'<circle cx="{cx:.0f}" cy="30" r="4" fill="{color}"/>'
         legend_svg += f'<text x="{tx:.0f}" y="34" font-size="12" fill="{TEXT_COLOR}">{label}</text>'
 
@@ -428,7 +471,8 @@ def _burnup_chart_svg(
         <path d="{scope_line}" fill="none" stroke="{GITHUB_COLORS["open_scope"]}" stroke-width="2"/>
         <path d="{done_line}" fill="none" stroke="{GITHUB_COLORS["done"]}" stroke-width="2"/>
         <path d="{dup_line}" fill="none" stroke="#9ca3af" stroke-width="2" stroke-dasharray="4 4" opacity="0.9"/>
-        
+        {f'<path d="{ideal_step_path}" fill="none" stroke="{IDEAL_LINE_COLOR}" stroke-width="2" stroke-dasharray="6 4" opacity="0.9"/>' if ideal_step_path else ""}
+
         {x_labels_svg}
         
            <!-- Legend: compute positions with extra spacing to avoid overlap -->
@@ -573,11 +617,20 @@ def load_project_charts(
         return {}
 
     milestone_dues = [it.milestone_due for it in active_items if getattr(it, "milestone_due", None)]
-    end_date = min(milestone_dues) if milestone_dues else reference_date
+    if milestone_dues:
+        end_date = min(milestone_dues)
+        logger.info(
+            f"[burnup] end_date={end_date} via milestone due date (menor dueOn entre {len(milestone_dues)} item(s))"
+        )
+    else:
+        end_date = reference_date
+        logger.info(f"[burnup] end_date={end_date} via fallback reference_date (nenhum item com milestone_due)")
+
     created_dates = [it.created_at.date() for it in active_items if getattr(it, "created_at", None)]
     start_date = min(created_dates) if created_dates else (end_date - timedelta(days=30))
     if start_date > end_date:
         start_date = end_date - timedelta(days=30)
+    logger.info(f"[burnup] período considerado: start_date={start_date} -> end_date={end_date}")
 
     events_pts: List[Tuple[date, str, float]] = []
     for item in active_items:
@@ -651,6 +704,8 @@ def load_project_charts(
     final_done_display = int(total_done_pts)
     final_dup_display = int(total_dup_pts)
 
+    ideal_series = _compute_ideal_step_series(active_items, burnup_dates, start_date, end_date)
+
     burnup_svg = _burnup_chart_svg(
         burnup_dates,
         scope_series,
@@ -660,6 +715,7 @@ def load_project_charts(
         final_open=final_open_display,
         final_done=final_done_display,
         final_dup=final_dup_display,
+        ideal_series=ideal_series,
     )
 
     cutoff = reference_date or date.today()
