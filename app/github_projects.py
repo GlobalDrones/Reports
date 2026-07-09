@@ -367,6 +367,7 @@ def _burnup_chart_svg(
     final_dup: int | None = None,
     ideal_series: List[float] | None = None,
     done_review_series: List[float] | None = None,
+    today_marker_date: date | None = None,
 ) -> str:
     if not dates:
         return ""
@@ -427,6 +428,17 @@ def _burnup_chart_svg(
             f"{get_x(i):.1f},{get_y(v):.1f}" for i, v in enumerate(done_review_series)
         ]
         done_review_line = "M " + " ".join(done_review_points)
+
+    today_marker_svg = ""
+    if today_marker_date and dates[0] <= today_marker_date <= dates[-1]:
+        marker_idx = (today_marker_date - dates[0]).days
+        marker_x = get_x(marker_idx)
+        today_marker_svg = (
+            f'<line x1="{marker_x:.1f}" y1="{pad}" x2="{marker_x:.1f}" y2="{height - pad}" '
+            f'stroke="{TEXT_COLOR}" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.35"/>'
+            f'<text x="{marker_x:.1f}" y="{pad - 4}" font-size="9" fill="{TEXT_COLOR}" '
+            f'text-anchor="middle" opacity="0.6">{today_marker_date.strftime("%d/%b")}</text>'
+        )
 
     x_labels_svg = ""
     step = max(1, len(dates) // 8)
@@ -492,6 +504,7 @@ def _burnup_chart_svg(
         <path d="{dup_line}" fill="none" stroke="#9ca3af" stroke-width="2" stroke-dasharray="4 4" opacity="0.9"/>
         {f'<path d="{done_review_line}" fill="none" stroke="{DONE_REVIEW_LINE_COLOR}" stroke-width="2"/>' if done_review_line else ""}
         {f'<path d="{ideal_step_path}" fill="none" stroke="{IDEAL_LINE_COLOR}" stroke-width="2" stroke-dasharray="6 4" opacity="0.9"/>' if ideal_step_path else ""}
+        {today_marker_svg}
 
         {x_labels_svg}
         
@@ -611,6 +624,7 @@ def load_project_charts(
     milestone_month: str = "Março",
     reference_date: date | None = None,
     milestone_label: str | None = None,
+    today_marker_date: date | None = None,
 ) -> dict[str, Any]:
     if not reference_date:
         reference_date = date.today()
@@ -761,6 +775,7 @@ def load_project_charts(
         final_dup=final_dup_display,
         ideal_series=ideal_series,
         done_review_series=burnup_done_review_pts,
+        today_marker_date=today_marker_date,
     )
 
     cutoff = reference_date or date.today()

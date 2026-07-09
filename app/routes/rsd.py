@@ -76,8 +76,17 @@ def download_reports(
     project_slug: str = Form(...),
     team_slug: str | None = Form(None),
     milestone_month: str | None = Form(None),
+    reference_date: str | None = Form(None),
 ):
     settings = request.app.state.settings
+
+    today_marker_date: date | None = None
+    if reference_date:
+        try:
+            today_marker_date = date.fromisoformat(reference_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid reference_date: {exc}")
+
     if project_slug == "__all__":
         if team_slug:
             raise HTTPException(status_code=400, detail="Team filter not supported for all projects")
@@ -109,6 +118,7 @@ def download_reports(
                 file_title=file_title,
                 milestone_month=None,
                 reports_by_project=reports_by_project,
+                today_marker_date=today_marker_date,
             )
 
         return FileResponse(output_path, filename=output_path.name, media_type="application/pdf")
@@ -147,6 +157,7 @@ def download_reports(
             project_slug=project_slug,
             file_title=file_title,
             milestone_month=milestone_month,
+            today_marker_date=today_marker_date,
         )
 
     return FileResponse(output_path, filename=output_path.name, media_type="application/pdf")

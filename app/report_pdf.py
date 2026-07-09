@@ -28,7 +28,9 @@ def render_pdf(
     file_title: str | None = None,
     milestone_month: str | None = None,
     reports_by_project: dict[str, dict[str, list[dict]]] | None = None,
+    today_marker_date: date | None = None,
 ) -> Path:
+    today_marker_date = today_marker_date or date.today()
     settings = get_settings()
     env = Environment(
         loader=FileSystemLoader(get_views_dir()),
@@ -281,6 +283,7 @@ def render_pdf(
             milestone_month=resolved_month,
             reference_date=ref_date,
             milestone_label=milestone_label,
+            today_marker_date=today_marker_date,
         )
         milestone_label = None
         if milestone_section and milestone_section.get("month"):
