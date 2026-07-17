@@ -199,7 +199,7 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
                             content {
                                 __typename
                                 ... on Issue { title state stateReason labels(first: 10) { nodes { name } } repository { name } closedAt updatedAt }
-                                ... on PullRequest { title labels(first: 10) { nodes { name } } repository { name } closedAt mergedAt updatedAt }
+                                ... on PullRequest { title state labels(first: 10) { nodes { name } } repository { name } closedAt mergedAt updatedAt }
                                 ... on DraftIssue { title }
                             }
             }
@@ -637,7 +637,7 @@ def load_project_charts(
             continue
         if item.content_type == "DraftIssue":
             continue
-        if item.content_type == "PullRequest":
+        if item.content_type == "PullRequest" and str(item.content_state or "").upper() == "CLOSED":
             continue
         if _bucket_status(item.status) == "cancelled":
             continue
@@ -805,7 +805,7 @@ def load_project_charts(
 
     for it in items_cut:
         sk = _bucket_status(it.status)
-        if sk == "cancelled":
+        if sk in ("cancelled", "no_status", "blocked"):
             continue
         is_dup_flag = _is_duplicate_item(it)
 

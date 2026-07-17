@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -272,7 +272,7 @@ def render_pdf(
             pass
 
         if week_end:
-            ref_date = week_end + timedelta(days=6)
+            ref_date = week_end
         else:
             ref_date = date.today()
 
