@@ -280,9 +280,6 @@
         const dayNr = (target.getUTCDay() + 6) % 7;
         const thursdayOffset = 3 - dayNr;
         target.setUTCDate(target.getUTCDate() + thursdayOffset);
-        if (thursdayOffset < 0) {
-          target.setUTCDate(target.getUTCDate() + 7);
-        }
         const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
         const weekNumber = 1 + Math.round((target - firstThursday) / 86400000 / 7);
         const weekYear = target.getUTCFullYear();
