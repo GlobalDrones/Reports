@@ -794,7 +794,7 @@ def load_project_charts(
         for it in baseline_items
         if getattr(it, "iteration_start", None) and getattr(it, "iteration_end", None)
     ]
-    items_cut = [it for it in iter_items if it.iteration_end <= cutoff]
+    items_cut = [it for it in iter_items if it.iteration_start <= cutoff]
 
     count_totals: Dict[str, int] = {
         k: 0 for k in ["backlog", "blocked", "progress", "review", "done", "duplicate"]
