@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -288,6 +288,12 @@ def start_scheduler(app) -> None:
                         if key in state["sent"]:
                             continue
 
+                        publish_week_id = (
+                            _iso_week_id(now.date() - timedelta(days=7))
+                            if schedule.get("previous_week")
+                            else week_id
+                        )
+
                         all_publish_recipients = list(
                             dict.fromkeys(recipients + settings.global_publish_recipients)
                         )
@@ -296,7 +302,7 @@ def start_scheduler(app) -> None:
                             project_slug,
                             all_publish_recipients,
                             team_slug,
-                            week_id,
+                            publish_week_id,
                             publish_title,
                             publish_text,
                         )
