@@ -8,6 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi import Form
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from app import db
 from app.report_pdf import render_pdf
@@ -105,23 +106,27 @@ def download_reports(
 
         period_label, _ = _iso_week_label(week_id)
         file_title, output_name = _build_weekly_filename(week_id, "todos-projetos", None)
-        output_path = _safe_pdf_path(settings, output_name)
+        output_path = _safe_pdf_path(settings, f"{uuid4().hex}-{output_name}")
 
-        if not output_path.exists():
-            render_pdf(
-                week_id,
-                reports,
-                {},
-                output_path,
-                period_label,
-                project_slug="__all__",
-                file_title=file_title,
-                milestone_month=None,
-                reports_by_project=reports_by_project,
-                today_marker_date=today_marker_date,
-            )
+        render_pdf(
+            week_id,
+            reports,
+            {},
+            output_path,
+            period_label,
+            project_slug="__all__",
+            file_title=file_title,
+            milestone_month=None,
+            reports_by_project=reports_by_project,
+            today_marker_date=today_marker_date,
+        )
 
-        return FileResponse(output_path, filename=output_path.name, media_type="application/pdf")
+        return FileResponse(
+            output_path,
+            filename=output_name,
+            media_type="application/pdf",
+            background=BackgroundTask(output_path.unlink, missing_ok=True),
+        )
 
     try:
         project_slug, project = settings.get_project(project_slug)
@@ -145,22 +150,26 @@ def download_reports(
 
     period_label, _ = _iso_week_label(week_id)
     file_title, output_name = _build_weekly_filename(week_id, project_slug, team_slug)
-    output_path = _safe_pdf_path(settings, output_name)
+    output_path = _safe_pdf_path(settings, f"{uuid4().hex}-{output_name}")
 
-    if not output_path.exists():
-        render_pdf(
-            week_id,
-            reports,
-            reports_by_team,
-            output_path,
-            period_label,
-            project_slug=project_slug,
-            file_title=file_title,
-            milestone_month=milestone_month,
-            today_marker_date=today_marker_date,
-        )
+    render_pdf(
+        week_id,
+        reports,
+        reports_by_team,
+        output_path,
+        period_label,
+        project_slug=project_slug,
+        file_title=file_title,
+        milestone_month=milestone_month,
+        today_marker_date=today_marker_date,
+    )
 
-    return FileResponse(output_path, filename=output_path.name, media_type="application/pdf")
+    return FileResponse(
+        output_path,
+        filename=output_name,
+        media_type="application/pdf",
+        background=BackgroundTask(output_path.unlink, missing_ok=True),
+    )
 
 
 def _build_form_endpoint(project_slug: str):
