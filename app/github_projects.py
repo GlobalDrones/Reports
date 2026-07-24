@@ -46,6 +46,7 @@ class ProjectItem:
     difficulty: float
     estimate_hours: float
     labels: List[str]
+    feature: str | None = None
     content_type: str = "Issue"
     repository: str | None = None
     is_archived: bool = False
@@ -217,6 +218,7 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
     FIELD_ITERATION = "Iteration"
     FIELD_MILESTONE = "Milestone"
     FIELD_ESTIMATE = "Estimate"
+    FIELD_FEATURE = "Feature"
 
     while True:
         try:
@@ -248,6 +250,7 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
             milestone_due = None
             difficulty = 0.0
             estimate = 0.0
+            feature = None
 
             for fv in field_values:
                 f_name = fv.get("field", {}).get("name", "")
@@ -279,6 +282,9 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
                         duration = fv.get("duration", 0)
                         iteration_end = iteration_start + timedelta(days=duration)
 
+                elif _normalize_text(f_name) == _normalize_text(FIELD_FEATURE):
+                    feature = fv.get("name") or None
+
             labels = []
             lbl_nodes = (content.get("labels") or {}).get("nodes") or []
             labels = [l.get("name") for l in lbl_nodes if l.get("name")]
@@ -309,6 +315,7 @@ def fetch_project_items(token: str, project_id: str) -> List[ProjectItem]:
                 difficulty=difficulty,
                 estimate_hours=estimate,
                 labels=labels,
+                feature=feature,
                 content_type=content.get("__typename", "Issue"),
                 repository=(content.get("repository") or {}).get("name"),
                 is_archived=node.get("isArchived", False),
@@ -929,7 +936,8 @@ def load_project_charts(
         st = _bucket_status(item.status)
         if st not in ["backlog", "progress", "review", "done"]:
             st = "backlog"
-        for lbl in item.labels:
+        item_labels = item.labels if item.labels else ([item.feature] if item.feature else [])
+        for lbl in item_labels:
             if lbl not in label_map:
                 label_map[lbl] = {"backlog": 0, "progress": 0, "review": 0, "done": 0}
             label_map[lbl][st] = label_map[lbl].get(st, 0) + 1
