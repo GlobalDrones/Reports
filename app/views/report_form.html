@@ -29,9 +29,10 @@
           </div>
         </noscript>
         <label>
-          Data de referência
-          <input id="reference_date" type="date" required />
+          Semana de referência
+          <input id="week_picker" type="week" required />
         </label>
+        <p id="week-display" class="field-help">Semana selecionada: -</p>
         <input type="hidden" name="week_id" id="week_id" value="{{ week }}" />
         <label>
           Projeto
@@ -274,60 +275,25 @@
       const reportLookupUrl = "{{ '/api/report' if not project_slug else '/' + project_slug + '/report' }}";
 
       const weekInput = document.getElementById("week_id");
-      const referenceDateInput = document.getElementById("reference_date");
-      const getIsoWeekId = (dateObj) => {
-        const target = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
-        const dayNr = (target.getUTCDay() + 6) % 7;
-        const thursdayOffset = 3 - dayNr;
-        target.setUTCDate(target.getUTCDate() + thursdayOffset);
-        const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
-        const weekNumber = 1 + Math.round((target - firstThursday) / 86400000 / 7);
-        const weekYear = target.getUTCFullYear();
-        return `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
+      const weekPickerInput = document.getElementById("week_picker");
+      const weekDisplay = document.getElementById("week-display");
+      const syncWeekDisplay = () => {
+        if (weekDisplay) {
+          weekDisplay.textContent = `Semana selecionada: ${weekInput?.value || "-"}`;
+        }
       };
-      const setReferenceDate = () => {
-        if (!referenceDateInput || referenceDateInput.value || (weekInput && weekInput.value)) {
-          return;
+      if (weekPickerInput) {
+        weekPickerInput.value = weekInput?.value || "";
+      }
+      syncWeekDisplay();
+      const handleWeekPickerChange = () => {
+        if (weekInput) {
+          weekInput.value = weekPickerInput.value;
         }
-        const today = new Date();
-        const pad = (n) => String(n).padStart(2, "0");
-        referenceDateInput.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-      };
-      const setReferenceDateFromWeek = () => {
-        if (!referenceDateInput || !weekInput || !weekInput.value || referenceDateInput.value) {
-          return;
-        }
-        const [yearStr, weekStr] = weekInput.value.split("-W");
-        const year = Number(yearStr);
-        const week = Number(weekStr);
-        if (!year || !week) {
-          return;
-        }
-        const friday = new Date(Date.UTC(year, 0, 4));
-        friday.setUTCDate(friday.getUTCDate() + (week - 1) * 7);
-        const dayNr = (friday.getUTCDay() + 6) % 7;
-        friday.setUTCDate(friday.getUTCDate() - dayNr + 4);
-        referenceDateInput.value = friday.toISOString().slice(0, 10);
-      };
-      const setWeekFromReferenceDate = () => {
-        if (!weekInput || !referenceDateInput) {
-          return;
-        }
-        if (!referenceDateInput.value) {
-          return;
-        }
-        const [year, month, day] = referenceDateInput.value.split("-").map(Number);
-        const selectedDate = new Date(year, (month || 1) - 1, day || 1);
-        weekInput.value = getIsoWeekId(selectedDate);
-      };
-      setReferenceDateFromWeek();
-      setReferenceDate();
-      setWeekFromReferenceDate();
-      const handleReferenceDateChange = () => {
-        setWeekFromReferenceDate();
+        syncWeekDisplay();
         loadExistingReport();
       };
-      referenceDateInput?.addEventListener("change", handleReferenceDateChange);
+      weekPickerInput?.addEventListener("change", handleWeekPickerChange);
 
       const devSelect = document.getElementById("developer_name");
       const teamSelect = document.getElementById("team_select");
@@ -783,8 +749,10 @@
           setupTeams();
           toggleDeliveriesField();
           toggleDifficultiesField();
-          setReferenceDate();
-          setWeekFromReferenceDate();
+          if (weekPickerInput) {
+            weekPickerInput.value = weekInput?.value || "";
+          }
+          syncWeekDisplay();
           deliveriesLinksContainer.innerHTML = "";
           createDeliveryLinkItem();
         } catch (error) {

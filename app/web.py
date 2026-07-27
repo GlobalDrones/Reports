@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Optional
 
 from fastapi import Request
@@ -8,6 +9,11 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import get_views_dir
 from app.milestones import list_milestone_months
+
+
+def _current_iso_week() -> str:
+    iso = date.today().isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
 
 
 templates = Jinja2Templates(directory=get_views_dir())
@@ -42,7 +48,7 @@ def render_form(
         "report_form.html",
         {
             "request": request,
-            "week": week or "",
+            "week": week or _current_iso_week(),
             "project_name": project.name,
             "project_slug": project_slug,
             "team_slug": team_slug or "",

@@ -176,9 +176,10 @@ def _build_form_endpoint(project_slug: str):
     def _endpoint(
         request: Request,
         team: str | None = None,
+        week: str | None = None,
     ):
         try:
-            return render_form(request, None, project_slug, team)
+            return render_form(request, week, project_slug, team)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
