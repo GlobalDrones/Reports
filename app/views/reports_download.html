@@ -102,7 +102,8 @@
           return;
         }
         const today = new Date();
-        referenceDateInput.value = today.toISOString().slice(0, 10);
+        const pad = (n) => String(n).padStart(2, "0");
+        referenceDateInput.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
       };
 
       const setWeekFromReferenceDate = () => {
